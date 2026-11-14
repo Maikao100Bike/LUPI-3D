@@ -1,0 +1,1016 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#F7F3EB">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>Lupi 3D — Controle</title>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
+
+  <style>
+    :root {
+      --bg: #F7F3EB; --card: #FFFFFF; --card2: #F0EBE1; --text: #3D3429; --muted: #8A7E6E;
+      --primary: #9A8570; --primary-dark: #7D6B58; --success: #5A8F6B; --danger: #C45C4A;
+      --warning: #C49A4A; --border: #E5DDD0; --radius: 16px;
+      --safe-bottom: env(safe-area-inset-bottom, 0px); --shadow: 0 2px 12px rgba(61,52,41,0.06);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100dvh; padding-bottom: calc(96px + var(--safe-bottom)); line-height: 1.45; }
+    header { position: sticky; top: 0; z-index: 50; background: rgba(247,243,235,0.92); backdrop-filter: blur(14px); padding: 14px 16px 12px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    header h1 { font-size: 1.25rem; font-weight: 600; letter-spacing: 0.06em; color: var(--primary-dark); font-family: Georgia, 'Times New Roman', serif; }
+    header h1 span { font-size: 0.68em; opacity: 0.7; margin-left: 1px; }
+    header .badge { font-size: 0.68rem; background: var(--primary); color: #fff; padding: 4px 10px; border-radius: 99px; font-weight: 600; }
+    header .badge.alert { background: var(--danger); }
+    header .sync-status { font-size: 0.7rem; margin-left: 8px; }
+    header .sync-status.online { color: var(--success); }
+    header .sync-status.offline { color: var(--danger); }
+    .page { display: none; padding: 16px; max-width: 640px; margin: 0 auto; }
+    .page.active { display: block; animation: fade 0.22s ease; }
+    @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    .grid { display: grid; gap: 12px; } .grid-2 { grid-template-columns: 1fr 1fr; }
+    .card { background: var(--card); border-radius: var(--radius); padding: 16px; border: 1px solid var(--border); box-shadow: var(--shadow); }
+    .card h3 { font-size: 0.7rem; color: var(--muted); font-weight: 500; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .card .value { font-size: 1.3rem; font-weight: 700; } .card .sub { font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
+    .positive { color: var(--success) !important; } .negative { color: var(--danger) !important; } .warning-text { color: var(--warning) !important; }
+    .list-item { background: var(--card); border-radius: var(--radius); padding: 14px; margin-bottom: 10px; border: 1px solid var(--border); box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 6px; }
+    .list-item .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+    .list-item .title { font-weight: 600; font-size: 0.95rem; } .list-item .meta { font-size: 0.8rem; color: var(--muted); }
+    .list-item .actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+    .status { font-size: 0.66rem; font-weight: 600; padding: 3px 9px; border-radius: 99px; text-transform: uppercase; white-space: nowrap; }
+    .status-pendente { background: #F5E6C8; color: #8B6914; } .status-producao { background: #E8E0D5; color: #6B5B4F; }
+    .status-concluido { background: #D4E8D9; color: #2E5A3A; } .status-entregue { background: #EDE8E0; color: #6B6560; }
+    .status-cancelado { background: #F5D9D4; color: #8B3A30; } .status-atrasado { background: #F5D0CB; color: #A13A2E; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 14px; border-radius: 12px; border: none; font-size: 0.88rem; font-weight: 600; cursor: pointer; }
+    .btn:active { opacity: 0.8; transform: scale(0.98); }
+    .btn-primary { background: var(--primary); color: #fff; } .btn-success { background: var(--success); color: #fff; }
+    .btn-danger { background: var(--danger); color: #fff; } .btn-warning { background: var(--warning); color: #fff; }
+    .btn-ghost { background: var(--card2); color: var(--text); border: 1px solid var(--border); }
+    .btn-sm { padding: 7px 11px; font-size: 0.78rem; } .btn-block { width: 100%; }
+    .form-group { margin-bottom: 14px; } .form-group label { display: block; font-size: 0.78rem; color: var(--muted); margin-bottom: 5px; }
+    input, select, textarea { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--border); background: #FFFCFA; color: var(--text); font-size: 1rem; }
+    input:focus, select:focus, textarea:focus { outline: 2px solid var(--primary); border-color: transparent; }
+    textarea { min-height: 70px; resize: vertical; } .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .modal-overlay { position: fixed; inset: 0; background: rgba(61,52,41,0.45); z-index: 100; display: none; align-items: flex-end; justify-content: center; }
+    .modal-overlay.open { display: flex; }
+    .modal { background: var(--card); width: 100%; max-width: 520px; max-height: 92dvh; border-radius: 22px 22px 0 0; padding: 22px 16px calc(20px + var(--safe-bottom)); overflow-y: auto; animation: slideUp 0.25s ease; }
+    @keyframes slideUp { from { transform: translateY(100%); } to { transform: none; } }
+    .modal h2 { font-size: 1.15rem; margin-bottom: 16px; color: var(--primary-dark); font-family: Georgia, serif; }
+    .modal-actions { display: flex; gap: 10px; margin-top: 18px; } .modal-actions .btn { flex: 1; }
+    nav { position: fixed; bottom: 0; left: 0; right: 0; z-index: 40; background: rgba(255,252,250,0.95); backdrop-filter: blur(14px); border-top: 1px solid var(--border); display: flex; justify-content: space-around; padding: 8px 0 calc(16px + var(--safe-bottom)); }
+    nav button { background: none; border: none; color: var(--muted); font-size: 0.62rem; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 5px 4px; cursor: pointer; min-width: 50px; position: relative; font-weight: 500; }
+    nav button.active { color: var(--primary-dark); } nav button span.icon { font-size: 1.2rem; }
+    nav .nav-badge { position: absolute; top: 0; right: 2px; background: var(--danger); color: white; font-size: 0.58rem; width: 15px; height: 15px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; }
+    .chart-container { position: relative; height: 210px; margin-top: 8px; }
+    .empty { text-align: center; padding: 40px 20px; color: var(--muted); } .empty .icon { font-size: 2.4rem; margin-bottom: 10px; opacity: 0.7; }
+    .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+    .section-header h2 { font-size: 1.05rem; color: var(--primary-dark); font-family: Georgia, serif; }
+    .chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 8px; }
+    .chip { flex-shrink: 0; padding: 6px 13px; border-radius: 99px; font-size: 0.78rem; font-weight: 500; background: var(--card); border: 1px solid var(--border); color: var(--muted); cursor: pointer; }
+    .chip.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    th, td { padding: 9px 6px; text-align: left; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 500; font-size: 0.7rem; text-transform: uppercase; }
+    td.num { text-align: right; }
+    .tag-pf { background: #E8E0D5; color: #6B5B4F; font-size: 0.62rem; padding: 2px 7px; border-radius: 4px; font-weight: 600; }
+    .tag-pj { background: #E5DDD0; color: #5A4F42; font-size: 0.62rem; padding: 2px 7px; border-radius: 4px; font-weight: 600; }
+    .alert-box { background: #FDF6E9; border: 1px solid #E8D5B0; border-radius: 12px; padding: 12px; margin-bottom: 12px; font-size: 0.85rem; color: #6B5B4F; }
+    .alert-box.danger { background: #FDF0EE; border-color: #E8C0B8; color: #8B3A30; }
+    .mt-2 { margin-top: 8px; } .mt-3 { margin-top: 12px; } .mb-3 { margin-bottom: 12px; }
+    .text-sm { font-size: 0.85rem; } .text-muted { color: var(--muted); } .hidden { display: none !important; }
+    .profit-positive { color: var(--success); font-weight: 600; } .profit-negative { color: var(--danger); font-weight: 600; }
+    #loading { position: fixed; inset: 0; background: var(--bg); z-index: 999; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: Georgia, serif; color: var(--primary-dark); }
+    #loading.hidden { display: none; }
+    #loading .spinner { width: 36px; height: 36px; border: 3px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 16px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    input[type=search] { -webkit-appearance: none; appearance: none; }
+    .search-box { margin-bottom: 10px; }
+    .filters-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 12px; }
+    .filters-row select { padding: 10px 12px; }
+    .tag-pk { background: #DCE8DF; color: #2E5A3A; font-size: 0.62rem; padding: 2px 7px; border-radius: 4px; font-weight: 600; }
+    .checklist { background: var(--card2); border-radius: 12px; padding: 10px 12px; margin-top: 4px; }
+    .check-head { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; font-weight: 500; }
+    .check-item { display: flex; align-items: center; gap: 10px; padding: 7px 0; font-size: 0.9rem; cursor: pointer; }
+    .check-item input { width: 22px; height: 22px; padding: 0; flex-shrink: 0; accent-color: var(--success); }
+    .check-item small { color: var(--muted); font-size: 0.72rem; }
+    .check-item.done span { text-decoration: line-through; opacity: 0.6; }
+    .toast { position: fixed; left: 12px; right: 12px; bottom: calc(104px + var(--safe-bottom)); z-index: 200; background: #3D3429; color: #fff; padding: 12px 14px; border-radius: 12px; font-size: 0.85rem; box-shadow: 0 6px 20px rgba(0,0,0,0.25); }
+  </style>
+</head>
+<body>
+  <div id="loading"><div class="spinner"></div><div>Carregando Lupi 3D...</div></div>
+  <div id="toast" class="toast hidden"></div>
+
+  <header>
+    <div style="display:flex;align-items:center">
+      <h1>LUPI<span>3D</span></h1>
+      <span class="sync-status" id="sync-status">•</span>
+    </div>
+    <span class="badge" id="header-badge">0 ativos</span>
+  </header>
+
+  <div id="page-dashboard" class="page active">
+    <div id="alertas-prazo"></div>
+    <div id="alertas-estoque"></div>
+    <div class="grid grid-2 mb-3">
+      <div class="card"><h3>Saldo Atual</h3><div class="value" id="dash-saldo">R$ 0,00</div></div>
+      <div class="card"><h3>Lucro do Mês</h3><div class="value" id="dash-lucro">R$ 0,00</div></div>
+      <div class="card"><h3>Receita Mês</h3><div class="value positive" id="dash-receita">R$ 0,00</div></div>
+      <div class="card"><h3>Despesas Mês</h3><div class="value negative" id="dash-despesa">R$ 0,00</div></div>
+    </div>
+    <div class="grid grid-2 mb-3">
+      <div class="card"><h3>Pedidos Ativos</h3><div class="value" id="dash-ativos">0</div><div class="sub" id="dash-atrasados">0 atrasados</div></div>
+      <div class="card"><h3>Estoque Filamento</h3><div class="value" id="dash-estoque">0 g</div><div class="sub" id="dash-estoque-sub">—</div></div>
+    </div>
+    <div class="card mb-3"><h3>Status dos Pedidos</h3><div class="chart-container"><canvas id="chart-status"></canvas></div></div>
+    <div class="card mb-3"><h3>Receita × Despesa (6 meses)</h3><div class="chart-container"><canvas id="chart-fluxo"></canvas></div></div>
+    <div class="card"><h3>Top Projetos por Filamento</h3><div class="chart-container"><canvas id="chart-projetos"></canvas></div></div>
+  </div>
+
+  <div id="page-projetos" class="page">
+    <div class="section-header"><h2>Catálogo</h2><button class="btn btn-primary btn-sm" onclick="novoCatalogo()">+ Novo</button></div>
+    <div class="chips" id="filtro-catalogo">
+      <button class="chip active" data-aba="projetos">Projetos</button>
+      <button class="chip" data-aba="pacotes">Pacotes</button>
+    </div>
+    <div class="search-box"><input type="search" id="busca-projetos" placeholder="Buscar projeto..."></div>
+    <div id="lista-projetos"></div>
+  </div>
+
+  <div id="page-pedidos" class="page">
+    <div class="section-header"><h2>Pedidos</h2><button class="btn btn-primary btn-sm" onclick="abrirModalPedido()">+ Novo</button></div>
+    <div class="chips" id="filtro-status">
+      <button class="chip active" data-status="todos">Todos</button>
+      <button class="chip" data-status="pendente">Pendente</button>
+      <button class="chip" data-status="producao">Produção</button>
+      <button class="chip" data-status="concluido">Concluído</button>
+      <button class="chip" data-status="entregue">Entregue</button>
+      <button class="chip" data-status="atrasado">Atrasados</button>
+    </div>
+    <div class="search-box"><input type="search" id="busca-pedidos" placeholder="Buscar cliente, projeto ou pacote..."></div>
+    <div class="filters-row">
+      <select id="f-ped-tipo"><option value="todos">Todos os clientes</option><option value="pf">Só PF</option><option value="pj">Só PJ</option></select>
+      <select id="f-ped-pago"><option value="todos">Pago e em aberto</option><option value="pago">Só pagos</option><option value="aberto">Só em aberto</option></select>
+      <select id="f-ped-periodo"><option value="todos">Qualquer data</option><option value="mes">Este mês</option><option value="mespassado">Mês passado</option><option value="30d">Últimos 30 dias</option></select>
+    </div>
+    <div id="lista-pedidos"></div>
+  </div>
+
+  <div id="page-caixa" class="page">
+    <div class="section-header"><h2>Fluxo de Caixa</h2><button class="btn btn-primary btn-sm" onclick="abrirModalTransacao()">+ Lançamento</button></div>
+    <div class="grid grid-2 mb-3">
+      <div class="card"><h3>Entradas</h3><div class="value positive" id="caixa-entradas">R$ 0,00</div></div>
+      <div class="card"><h3>Saídas</h3><div class="value negative" id="caixa-saidas">R$ 0,00</div></div>
+    </div>
+    <div class="chips" id="filtro-caixa">
+      <button class="chip active" data-tipo="todos">Todos</button>
+      <button class="chip" data-tipo="entrada">Entradas</button>
+      <button class="chip" data-tipo="saida">Saídas</button>
+    </div>
+    <div class="search-box"><input type="search" id="busca-caixa" placeholder="Buscar lançamento..."></div>
+    <div class="filters-row">
+      <select id="f-cx-cat"><option value="todos">Todas categorias</option></select>
+      <select id="f-cx-mes"><option value="todos">Todos os meses</option></select>
+    </div>
+    <div id="lista-transacoes"></div>
+  </div>
+
+  <div id="page-filamento" class="page">
+    <div class="section-header"><h2>Estoque de Filamento</h2><button class="btn btn-primary btn-sm" onclick="abrirModalFilamento()">+ Novo</button></div>
+    <div class="search-box"><input type="search" id="busca-filamentos" placeholder="Buscar cor ou material..."></div>
+    <div class="filters-row">
+      <select id="f-fil-mat"><option value="todos">Todos materiais</option></select>
+      <select id="f-fil-baixo"><option value="todos">Todos os estoques</option><option value="baixo">Só estoque baixo</option></select>
+    </div>
+    <div id="lista-filamentos"></div>
+  </div>
+
+  <div id="page-relatorios" class="page">
+    <div class="section-header"><h2>Relatórios de Lucro</h2></div>
+    <div class="chips mb-3" id="filtro-relatorio">
+      <button class="chip active" data-rel="projetos">Por Projeto</button>
+      <button class="chip" data-rel="clientes">Por Cliente</button>
+    </div>
+    <div id="conteudo-relatorio"></div>
+  </div>
+
+  <div id="page-config" class="page">
+    <div class="section-header"><h2>Configurações</h2></div>
+    <div class="card mb-3">
+      <h3>Dados da Empresa</h3>
+      <div class="form-group mt-2"><label>Nome da Empresa</label><input type="text" id="cfg-nome" placeholder="Lupi 3D"></div>
+    </div>
+    <div class="card mb-3">
+      <h3>Custeio (Cálculo de Lucro Real)</h3>
+      <p class="text-sm text-muted mb-3">Valores usados para calcular o custo real de cada pedido.</p>
+      <div class="form-group"><label>Custo de energia por hora de impressão (R$)</label><input type="number" id="cfg-energia" step="0.01" placeholder="Ex: 0.85"></div>
+      <div class="form-group"><label>Custo hora máquina / depreciação (R$)</label><input type="number" id="cfg-maquina" step="0.01" placeholder="Ex: 2.50"></div>
+      <div class="form-group"><label>Taxa de falha padrão (%)</label><input type="number" id="cfg-falha" step="0.1" placeholder="Ex: 8"></div>
+      <div class="form-group"><label>Margem de lucro desejada (%) — usada no preço sugerido</label><input type="number" id="cfg-margem" step="1" placeholder="Ex: 50"></div>
+      <button class="btn btn-primary btn-block" onclick="salvarConfig()">Salvar Configurações</button>
+    </div>
+    <div class="card mb-3">
+      <h3>Backup</h3>
+      <p class="text-sm text-muted mb-3">Baixe um JSON de segurança (os dados já ficam na nuvem).</p>
+      <button class="btn btn-ghost btn-block" onclick="exportarDados()">⬇️ Exportar JSON</button>
+      <button class="btn btn-ghost btn-block mt-2" onclick="document.getElementById('arquivo-backup').click()">⬆️ Importar backup</button>
+      <input type="file" id="arquivo-backup" accept=".json,application/json" class="hidden" onchange="importarDados(this)">
+    </div>
+    <div class="card mb-3">
+      <h3>Notificações de Prazo</h3>
+      <p class="text-sm text-muted mb-3">O navegador avisará sobre pedidos próximos do prazo ou atrasados.</p>
+      <button class="btn btn-ghost btn-block" onclick="pedirPermissaoNotificacao()">Ativar Notificações</button>
+    </div>
+    <div class="card">
+      <h3>Zona de Perigo</h3>
+      <button class="btn btn-danger btn-block mt-2" onclick="limparTudo()">Apagar todos os dados da nuvem</button>
+    </div>
+  </div>
+
+  <nav>
+    <button class="active" data-page="dashboard" onclick="navegar('dashboard')"><span class="icon">✦</span> Home</button>
+    <button data-page="projetos" onclick="navegar('projetos')"><span class="icon">◈</span> Projetos</button>
+    <button data-page="pedidos" onclick="navegar('pedidos')"><span class="icon">▣</span> Pedidos<span class="nav-badge hidden" id="nav-badge-atrasados">0</span></button>
+    <button data-page="caixa" onclick="navegar('caixa')"><span class="icon">◈</span> Caixa</button>
+    <button data-page="filamento" onclick="navegar('filamento')"><span class="icon">◉</span> Estoque</button>
+    <button data-page="relatorios" onclick="navegar('relatorios')"><span class="icon">◇</span> Lucro</button>
+    <button data-page="config" onclick="navegar('config')"><span class="icon">⚙</span> Config</button>
+  </nav>
+
+  <div class="modal-overlay" id="modal"><div class="modal" id="modal-content"></div></div>
+
+<script>
+// ========== CONFIGURAÇÃO DO FIREBASE ==========
+const firebaseConfig = {
+  apiKey: "AIzaSyBHU3CcbXxd-ynkf0oJOV6JW-NyH3s0bsw",
+  authDomain: "lupi-3d.firebaseapp.com",
+  projectId: "lupi-3d",
+  storageBucket: "lupi-3d.firebasestorage.app",
+  messagingSenderId: "742177255693",
+  appId: "1:742177255693:web:95c4410037b5f8d5060044",
+  measurementId: "G-JRD45JK84Q"
+};
+// ==========================================================
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const docRef = db.collection('lupi3d').doc('estado');
+
+const defaultState = {
+  config: { nome: 'Lupi 3D', custo_energia_hora: 0.80, custo_hora_maquina: 2.00, taxa_falha: 8 },
+  projetos: [], pacotes: [], pedidos: [], transacoes: [], filamentos: []
+};
+
+let state = JSON.parse(JSON.stringify(defaultState));
+let charts = {}, filtroStatus = 'todos', filtroCaixa = 'todos', filtroRel = 'projetos', editId = null;
+let salvando = false, primeiroLoad = true, saveTimeout = null;
+let abaCatalogo = 'projetos';
+let busca = { projetos: '', pedidos: '', caixa: '', filamentos: '' };
+let fPed = { tipo: 'todos', pago: 'todos', periodo: 'todos' };
+let fCx = { cat: 'todos', mes: 'todos' };
+let fFil = { material: 'todos', baixo: 'todos' };
+let itensTemp = [], pecasModal = [];
+
+function iniciarFirebase() {
+  docRef.onSnapshot((snap) => {
+    if (snap.exists) {
+      const data = snap.data();
+      state = {
+        config: { ...defaultState.config, ...(data.config || {}) },
+        projetos: data.projetos || [],
+        pacotes: data.pacotes || [],
+        pedidos: data.pedidos || [],
+        transacoes: data.transacoes || [],
+        filamentos: data.filamentos || []
+      };
+    } else {
+      state = JSON.parse(JSON.stringify(defaultState));
+      docRef.set(state);
+    }
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('sync-status').textContent = '●';
+    document.getElementById('sync-status').className = 'sync-status online';
+    if (primeiroLoad) { primeiroLoad = false; atualizarDashboard(); }
+    else atualizarTudo();
+  }, (err) => {
+    console.error(err);
+    document.getElementById('loading').innerHTML = `<div style="text-align:center;padding:20px;max-width:320px"><div style="font-size:2rem;margin-bottom:12px">⚠</div><div style="font-weight:600;margin-bottom:8px">Erro de conexão</div><div style="font-size:0.9rem;color:#8A7E6E;margin-bottom:12px">Verifique se você colou a configuração do Firebase corretamente no código.</div><div style="font-size:0.75rem;color:#8A7E6E">${err.message}</div></div>`;
+  });
+}
+
+function salvar() {
+  clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(async () => {
+    if (salvando) return;
+    salvando = true;
+    document.getElementById('sync-status').textContent = '○';
+    try {
+      await docRef.set(state);
+      document.getElementById('sync-status').textContent = '●';
+      document.getElementById('sync-status').className = 'sync-status online';
+    } catch (e) {
+      console.error(e);
+      document.getElementById('sync-status').textContent = '✕';
+      document.getElementById('sync-status').className = 'sync-status offline';
+      alert('Erro ao salvar na nuvem.');
+    }
+    salvando = false;
+  }, 350);
+}
+
+function norm(s) { return String(s == null ? '' : s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); }
+function localYM(offset = 0) { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + offset); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
+function localDateStr(daysAgo = 0) { const d = new Date(); d.setDate(d.getDate() - daysAgo); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function mesLabel(ym) { const [y, m] = ym.split('-'); return m + '/' + y; }
+function setOpts(id, html, val) {
+  const el = document.getElementById(id); if (!el) return true;
+  if (el.dataset.sig !== html) { el.innerHTML = html; el.dataset.sig = html; }
+  el.value = val;
+  if (el.value !== val) { el.value = 'todos'; return false; }
+  return true;
+}
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+function formatMoney(v) { return 'R$ ' + (Number(v)||0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function formatDate(d) { if (!d) return '—'; const [y,m,day] = d.split('-'); return `${day}/${m}/${y}`; }
+function hoje() { return localDateStr(0); }
+function isAtrasado(prazo, status) { if (!prazo || ['entregue','cancelado'].includes(status)) return false; return prazo < hoje(); }
+function diasRestantes(prazo) { if (!prazo) return null; return Math.ceil((new Date(prazo+'T12:00:00') - new Date()) / 86400000); }
+function esc(str) { if (!str) return ''; return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function calcularCustoPedido(p) {
+  const cfg = state.config;
+  const proj = state.projetos.find(x => x.id === p.projetoId);
+  const fil = state.filamentos.find(x => x.id === p.filamentoId);
+  const ePac = !!(p.pacoteId && p.pecas && p.pecas.length);
+  let gAuto = 0, hAuto = 0, cFilAuto = 0; const kgs = [];
+  if (ePac) {
+    p.pecas.forEach(pc => {
+      const pr = state.projetos.find(x => x.id === pc.projetoId);
+      const f = state.filamentos.find(x => x.id === pc.filamentoId);
+      const g = pr ? (Number(pr.filamento_g) || 0) : 0, h = pr ? (Number(pr.tempo_h) || 0) : 0;
+      const ck = f ? (Number(f.custo_kg) || 0) : 0;
+      gAuto += g; hAuto += h; cFilAuto += (g / 1000) * ck; if (f) kgs.push(ck);
+    });
+  }
+  const manualG = Number(p.filamento_g) || 0;
+  const grams = manualG || (ePac ? gAuto : (proj ? Number(proj.filamento_g) * (p.qtd||1) : 0));
+  const horas = Number(p.tempo_h) || (ePac ? hAuto : (proj ? Number(proj.tempo_h) * (p.qtd||1) : 0));
+  const custoKg = ePac ? (kgs.length ? kgs.reduce((a, b) => a + b, 0) / kgs.length : 0) : (fil ? Number(fil.custo_kg) : 0);
+  const custoFilamento = (ePac && !manualG) ? cFilAuto : (grams/1000) * custoKg;
+  const custoEnergia = horas * (Number(cfg.custo_energia_hora)||0);
+  const custoMaquina = horas * (Number(cfg.custo_hora_maquina)||0);
+  const base = custoFilamento + custoEnergia + custoMaquina;
+  const taxa = (Number(cfg.taxa_falha)||0)/100;
+  const frete = Number(p.frete)||0;
+  const ckF = f => { const ff = state.filamentos.find(x => x.id === f.filamentoId); return ff ? (Number(ff.custo_kg)||0) : custoKg; };
+  const falhasExtra = (p.falhas||[]).reduce((s,f) => s + ((Number(f.filamento_g)||0)/1000*ckF(f)) + ((Number(f.tempo_h)||0)*((Number(cfg.custo_energia_hora)||0)+(Number(cfg.custo_hora_maquina)||0))), 0);
+  const custoTotal = base*(1+taxa) + frete + falhasExtra;
+  const receita = Number(p.valor)||0;
+  return { grams, horas, custoTotal, receita, lucro: receita - custoTotal, margem: receita>0 ? ((receita-custoTotal)/receita*100) : 0 };
+}
+
+function navegar(page) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-'+page).classList.add('active');
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.dataset.page === page));
+  if (page==='dashboard') atualizarDashboard();
+  if (page==='projetos') renderProjetos();
+  if (page==='pedidos') renderPedidos();
+  if (page==='caixa') renderCaixa();
+  if (page==='filamento') renderFilamentos();
+  if (page==='relatorios') renderRelatorio();
+  if (page==='config') {
+    document.getElementById('cfg-nome').value = state.config.nome || 'Lupi 3D';
+    document.getElementById('cfg-energia').value = state.config.custo_energia_hora ?? '';
+    document.getElementById('cfg-maquina').value = state.config.custo_hora_maquina ?? '';
+    document.getElementById('cfg-falha').value = state.config.taxa_falha ?? '';
+    document.getElementById('cfg-margem').value = margemDesejada();
+  }
+}
+
+function atualizarDashboard() {
+  const agora = new Date(), mesAtual = agora.getMonth(), anoAtual = agora.getFullYear();
+  let saldo=0, receitaMes=0, despesaMes=0;
+  state.transacoes.forEach(t => {
+    const val = Number(t.valor)||0;
+    if (t.tipo==='entrada') saldo+=val; else saldo-=val;
+    const d = new Date(t.data+'T12:00:00');
+    if (d.getMonth()===mesAtual && d.getFullYear()===anoAtual) { if (t.tipo==='entrada') receitaMes+=val; else despesaMes+=val; }
+  });
+  const lucro = receitaMes - despesaMes;
+  const ativos = state.pedidos.filter(p => !['entregue','cancelado'].includes(p.status)).length;
+  const atrasados = state.pedidos.filter(p => isAtrasado(p.prazo, p.status)).length;
+  const estoqueTotal = state.filamentos.reduce((s,f) => s + (Number(f.estoque_g)||0), 0);
+  const trinta = new Date(); trinta.setDate(trinta.getDate()-30);
+  let consumo30 = 0;
+  state.pedidos.forEach(p => { if (['concluido','entregue'].includes(p.status) && p.data && new Date(p.data)>=trinta) consumo30 += calcularCustoPedido(p).grams; });
+  const mediaDia = consumo30/30;
+  const diasEst = mediaDia>0 ? Math.floor(estoqueTotal/mediaDia) : null;
+
+  document.getElementById('dash-saldo').textContent = formatMoney(saldo);
+  document.getElementById('dash-saldo').className = 'value ' + (saldo>=0?'positive':'negative');
+  document.getElementById('dash-lucro').textContent = formatMoney(lucro);
+  document.getElementById('dash-lucro').className = 'value ' + (lucro>=0?'positive':'negative');
+  document.getElementById('dash-receita').textContent = formatMoney(receitaMes);
+  document.getElementById('dash-despesa').textContent = formatMoney(despesaMes);
+  document.getElementById('dash-ativos').textContent = ativos;
+  document.getElementById('dash-atrasados').textContent = atrasados + ' atrasado' + (atrasados!==1?'s':'');
+  document.getElementById('dash-atrasados').className = 'sub ' + (atrasados>0?'warning-text':'');
+  document.getElementById('dash-estoque').textContent = estoqueTotal>=1000 ? (estoqueTotal/1000).toFixed(1)+' kg' : Math.round(estoqueTotal)+' g';
+  document.getElementById('dash-estoque-sub').textContent = diasEst!==null ? `~${diasEst} dias de estoque` : 'Sem histórico de consumo';
+  document.getElementById('header-badge').textContent = ativos + ' ativo' + (ativos!==1?'s':'');
+  document.getElementById('header-badge').className = 'badge' + (atrasados>0?' alert':'');
+  const badge = document.getElementById('nav-badge-atrasados');
+  if (atrasados>0) { badge.textContent=atrasados; badge.classList.remove('hidden'); } else badge.classList.add('hidden');
+  renderAlertasPrazo(); renderAlertasEstoque(); renderChartStatus(); renderChartFluxo(); renderChartProjetos();
+}
+
+function renderAlertasPrazo() {
+  const el = document.getElementById('alertas-prazo');
+  const urgentes = state.pedidos.filter(p => {
+    if (['entregue','cancelado'].includes(p.status)) return false;
+    const d = diasRestantes(p.prazo); return d!==null && d<=2;
+  }).sort((a,b)=>(a.prazo||'').localeCompare(b.prazo||''));
+  if (!urgentes.length) { el.innerHTML=''; return; }
+  el.innerHTML = urgentes.map(p => {
+    const d = diasRestantes(p.prazo);
+    const cls = d<0 ? 'danger' : '';
+    const txt = d<0 ? `ATRASADO há ${Math.abs(d)} dia(s)` : d===0 ? 'VENCE HOJE' : `Vence em ${d} dia(s)`;
+    return `<div class="alert-box ${cls}">⚠ <strong>${esc(p.cliente)}</strong> — ${txt} (prazo ${formatDate(p.prazo)})</div>`;
+  }).join('');
+}
+
+function renderChartStatus() {
+  const counts = {pendente:0,producao:0,concluido:0,entregue:0,cancelado:0};
+  state.pedidos.forEach(p => { if (counts[p.status]!==undefined) counts[p.status]++; });
+  const ctx = document.getElementById('chart-status');
+  if (charts.status) charts.status.destroy();
+  charts.status = new Chart(ctx, { type:'doughnut', data:{ labels:['Pendente','Produção','Concluído','Entregue','Cancelado'], datasets:[{ data:Object.values(counts), backgroundColor:['#C49A4A','#9A8570','#5A8F6B','#A89B8C','#C45C4A'] }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom', labels:{ color:'#8A7E6E', boxWidth:12, padding:8, font:{size:11} } } } } });
+}
+
+function renderChartFluxo() {
+  const meses=[], entradas=[], saidas=[]; const agora=new Date();
+  for (let i=5;i>=0;i--) {
+    const d=new Date(agora.getFullYear(), agora.getMonth()-i, 1);
+    meses.push(d.toLocaleDateString('pt-BR',{month:'short',year:'2-digit'}));
+    let ent=0,sai=0;
+    state.transacoes.forEach(t=>{ const td=new Date(t.data+'T12:00:00'); if(td.getMonth()===d.getMonth()&&td.getFullYear()===d.getFullYear()){ if(t.tipo==='entrada')ent+=Number(t.valor)||0; else sai+=Number(t.valor)||0; } });
+    entradas.push(ent); saidas.push(sai);
+  }
+  const ctx=document.getElementById('chart-fluxo');
+  if(charts.fluxo) charts.fluxo.destroy();
+  charts.fluxo = new Chart(ctx,{ type:'bar', data:{ labels:meses, datasets:[{label:'Entradas',data:entradas,backgroundColor:'#5A8F6B'},{label:'Saídas',data:saidas,backgroundColor:'#C45C4A'}] }, options:{ responsive:true, maintainAspectRatio:false, scales:{ x:{ticks:{color:'#8A7E6E'},grid:{color:'#E5DDD0'}}, y:{ticks:{color:'#8A7E6E'},grid:{color:'#E5DDD0'}} }, plugins:{legend:{labels:{color:'#8A7E6E'}}} } });
+}
+
+function renderChartProjetos() {
+  const uso={};
+  state.pedidos.forEach(p=>{ if(['concluido','entregue'].includes(p.status)){ const proj=state.projetos.find(x=>x.id===p.projetoId); const nome=proj?proj.nome:(p.projetoNome||'Avulso'); uso[nome]=(uso[nome]||0)+calcularCustoPedido(p).grams; } });
+  const sorted=Object.entries(uso).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const ctx=document.getElementById('chart-projetos');
+  if(charts.projetos) charts.projetos.destroy();
+  charts.projetos = new Chart(ctx,{ type:'bar', data:{ labels:sorted.map(s=>s[0]), datasets:[{label:'Gramas',data:sorted.map(s=>s[1]),backgroundColor:'#9A8570'}] }, options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, scales:{ x:{ticks:{color:'#8A7E6E'},grid:{color:'#E5DDD0'}}, y:{ticks:{color:'#8A7E6E'},grid:{display:false}} }, plugins:{legend:{display:false}} } });
+}
+
+function novoCatalogo() { if (abaCatalogo === 'pacotes') abrirModalPacote(); else abrirModalProjeto(); }
+
+function renderProjetos() {
+  document.querySelectorAll('#filtro-catalogo .chip').forEach(c => c.classList.toggle('active', c.dataset.aba === abaCatalogo));
+  document.getElementById('busca-projetos').placeholder = abaCatalogo === 'pacotes' ? 'Buscar pacote...' : 'Buscar projeto...';
+  if (abaCatalogo === 'pacotes') return renderPacotes();
+  const el = document.getElementById('lista-projetos');
+  if (!state.projetos.length) { el.innerHTML = '<div class="empty"><div class="icon">◈</div>Nenhum projeto cadastrado.<br>Clique em + Novo</div>'; return; }
+  const q = norm(busca.projetos);
+  const lista = state.projetos.filter(p => !q || norm(p.nome + ' ' + (p.descricao || '')).includes(q));
+  if (!lista.length) { el.innerHTML = '<div class="empty">Nenhum projeto encontrado.</div>'; return; }
+  el.innerHTML = lista.map(p => `<div class="list-item"><div class="top"><div><div class="title">${esc(p.nome)}</div><div class="meta">${p.filamento_g||0} g · ${p.tempo_h||0} h · ${formatMoney(p.preco)}${infoCustoProjeto(p)}</div></div></div>${p.descricao?`<div class="meta">${esc(p.descricao)}</div>`:''}<div class="actions"><button class="btn btn-ghost btn-sm" onclick="abrirModalProjeto('${p.id}')">Editar</button><button class="btn btn-ghost btn-sm" onclick="duplicarProjeto('${p.id}')">Duplicar</button><button class="btn btn-danger btn-sm" onclick="excluirProjeto('${p.id}')">Excluir</button></div></div>`).join('');
+}
+
+function renderPacotes() {
+  const el = document.getElementById('lista-projetos');
+  if (!state.pacotes.length) { el.innerHTML = '<div class="empty"><div class="icon">▣</div>Nenhum pacote cadastrado.<br>Clique em + Novo</div>'; return; }
+  const q = norm(busca.projetos);
+  const nomeProj = id => { const pr = state.projetos.find(x => x.id === id); return pr ? pr.nome : '(projeto removido)'; };
+  const lista = state.pacotes.filter(k => !q || norm(k.nome + ' ' + (k.descricao || '') + ' ' + (k.itens || []).map(i => nomeProj(i.projetoId)).join(' ')).includes(q));
+  if (!lista.length) { el.innerHTML = '<div class="empty">Nenhum pacote encontrado.</div>'; return; }
+  el.innerHTML = lista.map(k => {
+    const itens = (k.itens || []).map(i => `${i.qtd||1}× ${esc(nomeProj(i.projetoId))}`).join(' · ');
+    const total = (k.itens || []).reduce((s, i) => s + (Number(i.qtd) || 1), 0);
+    return `<div class="list-item"><div class="top"><div><div class="title">${esc(k.nome)} <span class="tag-pk">PACOTE</span></div><div class="meta">${total} peça${total!==1?'s':''} · ${formatMoney(k.preco)}</div></div></div><div class="meta">${itens}</div>${k.descricao?`<div class="meta">${esc(k.descricao)}</div>`:''}<div class="actions"><button class="btn btn-ghost btn-sm" onclick="abrirModalPacote('${k.id}')">Editar</button><button class="btn btn-ghost btn-sm" onclick="duplicarPacote('${k.id}')">Duplicar</button><button class="btn btn-danger btn-sm" onclick="excluirPacote('${k.id}')">Excluir</button></div></div>`;
+  }).join('');
+}
+
+function abrirModalPacote(id = null) {
+  if (!state.projetos.length) return alert('Cadastre pelo menos um projeto antes de criar um pacote.');
+  editId = id; const k = id ? state.pacotes.find(x => x.id === id) : {};
+  itensTemp = (k.itens && k.itens.length) ? k.itens.map(i => ({ ...i })) : [{ projetoId: '', qtd: 1 }];
+  document.getElementById('modal-content').innerHTML = `<h2>${id?'Editar':'Novo'} Pacote</h2><div class="form-group"><label>Nome do pacote *</label><input id="m-pk-nome" value="${esc(k.nome||'')}" placeholder="Ex: Amigos de Natal"></div><div class="form-group"><label>Descrição</label><textarea id="m-pk-desc">${esc(k.descricao||'')}</textarea></div><div class="form-group"><label>Preço do pacote (R$)</label><input id="m-pk-preco" type="number" step="0.01" value="${k.preco||''}" placeholder="129.90"></div><div class="form-group"><label>Projetos que fazem parte do pacote</label><div id="pk-itens"></div><button class="btn btn-ghost btn-sm mt-2" onclick="pacoteAddItem()">+ Adicionar projeto</button></div><div class="modal-actions"><button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarPacote()">Salvar</button></div>`;
+  renderItensPacote();
+  document.getElementById('modal').classList.add('open');
+}
+
+function renderItensPacote() {
+  const opts = sel => '<option value="">— Selecione —</option>' + state.projetos.map(pr => `<option value="${pr.id}" ${sel===pr.id?'selected':''}>${esc(pr.nome)}</option>`).join('');
+  document.getElementById('pk-itens').innerHTML = itensTemp.map((it, i) => `<div style="display:grid;grid-template-columns:1fr 70px 44px;gap:8px;margin-bottom:8px;align-items:center"><select class="pk-proj">${opts(it.projetoId)}</select><input class="pk-qtd" type="number" min="1" value="${it.qtd||1}"><button class="btn btn-danger btn-sm" onclick="pacoteRemItem(${i})">✕</button></div>`).join('');
+}
+function lerItensPacote() {
+  const ps = document.querySelectorAll('#pk-itens .pk-proj'), qs = document.querySelectorAll('#pk-itens .pk-qtd');
+  itensTemp = Array.from(ps).map((sel, i) => ({ projetoId: sel.value, qtd: Math.max(1, parseInt(qs[i].value) || 1) }));
+}
+function pacoteAddItem() { lerItensPacote(); itensTemp.push({ projetoId: '', qtd: 1 }); renderItensPacote(); }
+function pacoteRemItem(i) { lerItensPacote(); itensTemp.splice(i, 1); if (!itensTemp.length) itensTemp.push({ projetoId: '', qtd: 1 }); renderItensPacote(); }
+
+function salvarPacote() {
+  const nome = document.getElementById('m-pk-nome').value.trim(); if (!nome) return alert('Nome é obrigatório');
+  lerItensPacote();
+  const itens = itensTemp.filter(i => i.projetoId);
+  if (!itens.length) return alert('Adicione pelo menos um projeto ao pacote');
+  const dados = { nome, descricao: document.getElementById('m-pk-desc').value.trim(), preco: Number(document.getElementById('m-pk-preco').value) || 0, itens };
+  if (editId) { const idx = state.pacotes.findIndex(x => x.id === editId); state.pacotes[idx] = { ...state.pacotes[idx], ...dados }; }
+  else state.pacotes.push({ id: uid(), ...dados });
+  salvar(); fecharModal(); renderProjetos();
+}
+function excluirPacote(id) {
+  if (!confirm('Excluir este pacote? Os pedidos já feitos com ele não são afetados.')) return;
+  state.pacotes = state.pacotes.filter(x => x.id !== id); salvar(); renderProjetos();
+}
+
+function abrirModalProjeto(id=null) {
+  editId=id; const p=id?state.projetos.find(x=>x.id===id):{};
+  document.getElementById('modal-content').innerHTML=`<h2>${id?'Editar':'Novo'} Projeto</h2><div class="form-group"><label>Nome *</label><input id="m-nome" value="${esc(p.nome||'')}" placeholder="Ex: Suporte de celular"></div><div class="form-group"><label>Descrição</label><textarea id="m-desc">${esc(p.descricao||'')}</textarea></div><div class="form-row"><div class="form-group"><label>Filamento médio (g)</label><input id="m-filamento" type="number" value="${p.filamento_g||''}" placeholder="45"></div><div class="form-group"><label>Tempo médio (h)</label><input id="m-tempo" type="number" step="0.1" value="${p.tempo_h||''}" placeholder="3.5"></div></div><div class="form-group"><label>Preço de venda (R$)</label><input id="m-preco" type="number" step="0.01" value="${p.preco||''}" placeholder="49.90"></div><div id="sugestao-preco" class="alert-box"></div><div class="modal-actions"><button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarProjeto()">Salvar</button></div>`;
+  iniciarSugestao();
+  document.getElementById('modal').classList.add('open');
+}
+
+function salvarProjeto() {
+  const nome=document.getElementById('m-nome').value.trim(); if(!nome) return alert('Nome é obrigatório');
+  const dados={ nome, descricao:document.getElementById('m-desc').value.trim(), filamento_g:Number(document.getElementById('m-filamento').value)||0, tempo_h:Number(document.getElementById('m-tempo').value)||0, preco:Number(document.getElementById('m-preco').value)||0 };
+  if(editId){ const idx=state.projetos.findIndex(x=>x.id===editId); state.projetos[idx]={...state.projetos[idx],...dados}; }
+  else state.projetos.push({id:uid(),...dados});
+  salvar(); fecharModal(); renderProjetos();
+}
+
+function excluirProjeto(id) {
+  const usados = state.pacotes.filter(k => (k.itens || []).some(i => i.projetoId === id));
+  const aviso = usados.length ? `Este projeto faz parte do(s) pacote(s): ${usados.map(k => k.nome).join(', ')}. Ele será removido deles. Excluir mesmo assim?` : 'Excluir este projeto?';
+  if (!confirm(aviso)) return;
+  state.projetos = state.projetos.filter(x => x.id !== id);
+  state.pacotes.forEach(k => { k.itens = (k.itens || []).filter(i => i.projetoId !== id); });
+  salvar(); renderProjetos();
+}
+
+function renderPedidos() {
+  const el=document.getElementById('lista-pedidos');
+  let lista=state.pedidos.slice().sort((a,b)=>(b.data||'').localeCompare(a.data||''));
+  if(filtroStatus==='atrasado') lista=lista.filter(p=>isAtrasado(p.prazo,p.status));
+  else if(filtroStatus!=='todos') lista=lista.filter(p=>p.status===filtroStatus);
+  const q=norm(busca.pedidos);
+  if(q) lista=lista.filter(p=>{ const pr=state.projetos.find(x=>x.id===p.projetoId); return norm([p.cliente,p.projetoNome,p.pacoteNome,pr&&pr.nome,p.obs,(p.pecas||[]).map(x=>x.nome).join(' ')].join(' ')).includes(q); });
+  if(fPed.tipo!=='todos') lista=lista.filter(p=>(p.tipo_cliente==='pj'?'pj':'pf')===fPed.tipo);
+  if(fPed.pago==='pago') lista=lista.filter(p=>p.pago); else if(fPed.pago==='aberto') lista=lista.filter(p=>!p.pago);
+  if(fPed.periodo==='mes') lista=lista.filter(p=>(p.data||'').startsWith(localYM(0)));
+  else if(fPed.periodo==='mespassado') lista=lista.filter(p=>(p.data||'').startsWith(localYM(-1)));
+  else if(fPed.periodo==='30d') lista=lista.filter(p=>(p.data||'')>=localDateStr(30));
+  if(!lista.length){ el.innerHTML='<div class="empty"><div class="icon">▣</div>Nenhum pedido encontrado.</div>'; return; }
+  el.innerHTML=lista.map(p=>{
+    const proj=state.projetos.find(x=>x.id===p.projetoId); const nomeProj=p.pacoteId?(p.pacoteNome||'Pacote'):(proj?proj.nome:(p.projetoNome||'—'));
+    const atrasado=isAtrasado(p.prazo,p.status); const statusClass=atrasado?'status-atrasado':'status-'+p.status; const statusLabel=atrasado?'ATRASADO':p.status;
+    const tipoTag=(p.tipo_cliente==='pj'?'<span class="tag-pj">PJ</span>':'<span class="tag-pf">PF</span>')+(p.pacoteId?' <span class="tag-pk">PACOTE</span>':'');
+    const custo=calcularCustoPedido(p);
+    const checklist=(p.pacoteId&&p.pecas&&p.pecas.length)?(()=>{ const feitas=p.pecas.filter(x=>x.feito).length; return `<div class="checklist"><div class="check-head">Peças prontas: ${feitas}/${p.pecas.length}</div>`+p.pecas.map((pc,i)=>{ const f=state.filamentos.find(x=>x.id===pc.filamentoId); const extra=[(p.qtd>1?'pacote '+(pc.kit||1):''), f?esc(f.material+' '+f.cor):''].filter(Boolean).join(' · '); return `<label class="check-item ${pc.feito?'done':''}"><input type="checkbox" ${pc.feito?'checked':''} onchange="togglePeca('${p.id}',${i})"><span>${esc(pc.nome)}${extra?` <small>${extra}</small>`:''}</span></label>`; }).join('')+`</div>`; })():'';
+    const lucroTxt=p.status==='cancelado'?'':`<span class="${custo.lucro>=0?'profit-positive':'profit-negative'}">${formatMoney(custo.lucro)}</span>`;
+    return `<div class="list-item"><div class="top"><div><div class="title">${esc(p.cliente||'Sem cliente')} ${tipoTag}</div><div class="meta">${esc(nomeProj)} × ${p.qtd||1}</div></div><span class="status ${statusClass}">${statusLabel}</span></div><div class="meta">${formatDate(p.data)} → ${formatDate(p.prazo)} · ${formatMoney(p.valor)} ${p.pago?' · ✓ Pago':' · ○ Aberto'} ${lucroTxt?' · Lucro est.: '+lucroTxt:''}</div>${checklist}<div class="actions">${botaoAvancar(p)}<button class="btn btn-ghost btn-sm" onclick="abrirModalPedido('${p.id}')">Editar</button><button class="btn btn-ghost btn-sm" onclick="duplicarPedido('${p.id}')">Duplicar</button>${!['entregue','cancelado'].includes(p.status)?`<button class="btn btn-warning btn-sm" onclick="abrirModalFalha('${p.id}')">Falha</button>`:''}<button class="btn btn-danger btn-sm" onclick="excluirPedido('${p.id}')">Excluir</button></div></div>`;
+  }).join('');
+}
+
+function montarPecas(pac, qtd) {
+  const out = [];
+  for (let k = 0; k < qtd; k++) {
+    (pac.itens || []).forEach(it => {
+      const pr = state.projetos.find(x => x.id === it.projetoId);
+      for (let q = 0; q < (Number(it.qtd) || 1); q++) out.push({ projetoId: it.projetoId, nome: pr ? pr.nome : '(projeto removido)', kit: k + 1, filamentoId: null, feito: false });
+    });
+  }
+  return out;
+}
+function lerFilamentosPecas() {
+  document.querySelectorAll('#lista-pecas-modal .peca-fil').forEach((sel, i) => { if (pecasModal[i]) pecasModal[i].filamentoId = sel.value || null; });
+}
+function renderPecasModal() {
+  const sel = document.getElementById('m-projeto').value;
+  const bUnico = document.getElementById('bloco-fil-unico'), bPecas = document.getElementById('bloco-pecas');
+  if (!sel.startsWith('k:')) { bUnico.classList.remove('hidden'); bPecas.classList.add('hidden'); return; }
+  bUnico.classList.add('hidden'); bPecas.classList.remove('hidden');
+  lerFilamentosPecas();
+  const pac = state.pacotes.find(x => x.id === sel.slice(2)); if (!pac) return;
+  const qtd = Math.max(1, parseInt(document.getElementById('m-qtd').value) || 1);
+  const novas = montarPecas(pac, qtd);
+  novas.forEach((n, i) => { const o = pecasModal[i]; if (o && o.projetoId === n.projetoId) { n.filamentoId = o.filamentoId; n.feito = o.feito; } });
+  pecasModal = novas;
+  const optsF = f => '<option value="">— Selecione —</option>' + state.filamentos.map(fl => `<option value="${fl.id}" ${f===fl.id?'selected':''}>${esc(fl.material)} ${esc(fl.cor)} (${Math.round(fl.estoque_g)}g)</option>`).join('');
+  document.getElementById('lista-pecas-modal').innerHTML = pecasModal.map(pc => `<div class="form-group"><label>${esc(pc.nome)}${qtd>1?' — pacote '+pc.kit:''}</label><select class="peca-fil">${optsF(pc.filamentoId)}</select></div>`).join('');
+}
+
+function abrirModalPedido(id=null, base=null) {
+  editId=id; const p=id?state.pedidos.find(x=>x.id===id):(base||{});
+  pecasModal = (p.pecas || []).map(x => ({ ...x }));
+  const optsProj=state.projetos.map(pr=>`<option value="p:${pr.id}" ${p.projetoId===pr.id&&!p.pacoteId?'selected':''}>${esc(pr.nome)}</option>`).join('');
+  const optsPac=state.pacotes.map(k=>`<option value="k:${k.id}" ${p.pacoteId===k.id?'selected':''}>${esc(k.nome)}</option>`).join('');
+  const optsFil=state.filamentos.map(f=>`<option value="${f.id}" ${p.filamentoId===f.id?'selected':''}>${esc(f.material)} ${esc(f.cor)} (${Math.round(f.estoque_g)}g)</option>`).join('');
+  document.getElementById('modal-content').innerHTML=`<h2>${id?'Editar':'Novo'} Pedido</h2><div class="form-group"><label>Cliente *</label><input id="m-cliente" value="${esc(p.cliente||'')}" placeholder="Nome do cliente"></div><div class="form-group"><label>Tipo de Cliente</label><select id="m-tipo-cliente"><option value="pf" ${p.tipo_cliente!=='pj'?'selected':''}>Pessoa Física (PF)</option><option value="pj" ${p.tipo_cliente==='pj'?'selected':''}>Pessoa Jurídica (PJ)</option></select></div><div class="form-group"><label>Projeto ou pacote</label><select id="m-projeto"><option value="">— Selecione —</option>${optsPac?`<optgroup label="Pacotes">${optsPac}</optgroup>`:''}<optgroup label="Projetos">${optsProj}</optgroup></select></div><div class="form-group" id="bloco-fil-unico"><label>Filamento a usar (desconto automático)</label><select id="m-filamento-id"><option value="">— Selecione —</option>${optsFil}</select></div><div id="bloco-pecas" class="hidden"><label style="display:block;font-size:0.78rem;color:var(--muted);margin-bottom:8px">Filamento de cada peça (desconto automático)</label><div id="lista-pecas-modal"></div></div><div class="form-row"><div class="form-group"><label>Quantidade</label><input id="m-qtd" type="number" min="1" value="${p.qtd||1}"></div><div class="form-group"><label>Valor total (R$)</label><input id="m-valor" type="number" step="0.01" value="${p.valor||''}"></div></div><div class="form-row"><div class="form-group"><label>Data do pedido</label><input id="m-data" type="date" value="${p.data||hoje()}"></div><div class="form-group"><label>Prazo de entrega</label><input id="m-prazo" type="date" value="${p.prazo||''}"></div></div><div class="form-group"><label>Status</label><select id="m-status"><option value="pendente" ${p.status==='pendente'?'selected':''}>Pendente</option><option value="producao" ${p.status==='producao'?'selected':''}>Em produção</option><option value="concluido" ${p.status==='concluido'?'selected':''}>Concluído</option><option value="entregue" ${p.status==='entregue'?'selected':''}>Entregue</option><option value="cancelado" ${p.status==='cancelado'?'selected':''}>Cancelado</option></select></div><div class="form-row"><div class="form-group"><label>Filamento real usado (g)</label><input id="m-filamento" type="number" value="${p.filamento_g||''}" placeholder="Vazio = média"></div><div class="form-group"><label>Tempo real (h)</label><input id="m-tempo" type="number" step="0.1" value="${p.tempo_h||''}" placeholder="Vazio = média"></div></div><div class="form-group"><label>Frete / Entrega (R$)</label><input id="m-frete" type="number" step="0.01" value="${p.frete||0}"></div><div class="form-group"><label><input type="checkbox" id="m-pago" ${p.pago?'checked':''}> Já foi pago?</label></div><div class="form-group"><label>Observações</label><textarea id="m-obs">${esc(p.obs||'')}</textarea></div><div class="modal-actions"><button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarPedido()">Salvar</button></div>`;
+  const selProj=document.getElementById('m-projeto');
+  selProj.value = p.pacoteId ? 'k:'+p.pacoteId : (p.projetoId ? 'p:'+p.projetoId : '');
+  selProj.addEventListener('change', e=>{
+    const v=e.target.value; let preco=null;
+    if(v.startsWith('k:')){ const k=state.pacotes.find(x=>x.id===v.slice(2)); if(k) preco=k.preco; }
+    else if(v.startsWith('p:')){ const pr=state.projetos.find(x=>x.id===v.slice(2)); if(pr) preco=pr.preco; }
+    if(preco!==null && !document.getElementById('m-valor').value){ const qtd=Number(document.getElementById('m-qtd').value)||1; document.getElementById('m-valor').value=((Number(preco)||0)*qtd).toFixed(2); }
+    renderPecasModal();
+  });
+  document.getElementById('m-qtd').addEventListener('input', renderPecasModal);
+  renderPecasModal();
+  document.getElementById('modal').classList.add('open');
+}
+
+function salvarPedido() {
+  const cliente=document.getElementById('m-cliente').value.trim(); if(!cliente) return alert('Cliente é obrigatório');
+  const sel=document.getElementById('m-projeto').value;
+  const projetoId=sel.startsWith('p:')?sel.slice(2):null; const pacoteId=sel.startsWith('k:')?sel.slice(2):null;
+  const proj=state.projetos.find(x=>x.id===projetoId); const pac=state.pacotes.find(x=>x.id===pacoteId);
+  const novoStatus=document.getElementById('m-status').value; let filamentoId=document.getElementById('m-filamento-id').value||null;
+  let pecas=[];
+  if(pac){ renderPecasModal(); pecas=pecasModal.map(x=>({projetoId:x.projetoId,nome:x.nome,kit:x.kit,filamentoId:x.filamentoId||null,feito:!!x.feito})); filamentoId=null; }
+  const dados={ cliente, tipo_cliente:document.getElementById('m-tipo-cliente').value, projetoId, projetoNome:proj?proj.nome:(pac?pac.nome:''), pacoteId, pacoteNome:pac?pac.nome:'', pecas, filamentoId, qtd:Number(document.getElementById('m-qtd').value)||1, valor:Number(document.getElementById('m-valor').value)||0, data:document.getElementById('m-data').value, prazo:document.getElementById('m-prazo').value, status:novoStatus, filamento_g:document.getElementById('m-filamento').value?Number(document.getElementById('m-filamento').value):null, tempo_h:document.getElementById('m-tempo').value?Number(document.getElementById('m-tempo').value):null, frete:Number(document.getElementById('m-frete').value)||0, pago:document.getElementById('m-pago').checked, obs:document.getElementById('m-obs').value.trim(), falhas:editId?(state.pedidos.find(x=>x.id===editId)?.falhas||[]):[] };
+  let pedidoAnterior=null;
+  if(editId){ const idx=state.pedidos.findIndex(x=>x.id===editId); pedidoAnterior={...state.pedidos[idx]}; state.pedidos[idx]={...state.pedidos[idx],...dados}; }
+  else state.pedidos.push({id:uid(), descontado:false, ...dados});
+  const pedidoAtual=editId?state.pedidos.find(x=>x.id===editId):state.pedidos[state.pedidos.length-1];
+  const eraPago=pedidoAnterior?pedidoAnterior.pago:false;
+  if(dados.pago && !eraPago && dados.valor>0){ state.transacoes.push({ id:uid(), tipo:'entrada', valor:dados.valor, data:hoje(), categoria:'Venda', descricao:`Pedido - ${dados.cliente} (${dados.projetoNome||'avulso'})`, pedidoId:pedidoAtual.id }); }
+  if(!dados.pago && eraPago){
+    const vinc=state.transacoes.filter(t=>t.pedidoId===pedidoAtual.id);
+    if(vinc.length && confirm(`Você desmarcou "pago". Remover do caixa o lançamento de entrada deste pedido (${vinc.map(t=>formatMoney(t.valor)).join(', ')})?\n\nOK = remover · Cancelar = manter no caixa`)) state.transacoes=state.transacoes.filter(t=>t.pedidoId!==pedidoAtual.id);
+  }
+  const statusConclusao=['concluido','entregue'];
+  const mudouParaConcluido=statusConclusao.includes(novoStatus) && (!pedidoAnterior || !statusConclusao.includes(pedidoAnterior.status));
+  if(mudouParaConcluido && !pedidoAtual.descontado) descontarFilamento(pedidoAtual);
+  salvar(); fecharModal(); renderPedidos(); verificarNotificacoes();
+}
+
+function descontarFilamento(pedido) {
+  if (pedido.pacoteId && pedido.pecas && pedido.pecas.length) {
+    const gDe = pc => { const pr = state.projetos.find(x => x.id === pc.projetoId); return pr ? (Number(pr.filamento_g) || 0) : 0; };
+    const gAuto = pedido.pecas.reduce((a, pc) => a + gDe(pc), 0);
+    const manual = Number(pedido.filamento_g) || 0;
+    const fator = manual > 0 ? (gAuto > 0 ? manual / gAuto : 0) : 1;
+    let ok = false, sem = false;
+    pedido.pecas.forEach(pc => {
+      const g = gDe(pc) * fator; if (g <= 0) return;
+      const fil = state.filamentos.find(f => f.id === pc.filamentoId);
+      if (!fil) { sem = true; return; }
+      fil.estoque_g = Math.max(0, (Number(fil.estoque_g) || 0) - g); ok = true;
+    });
+    if (ok) pedido.descontado = true;
+    if (sem) setTimeout(() => alert('Algumas peças do pacote estão sem filamento escolhido, então não descontei o estoque delas.'), 50);
+    return;
+  }
+  if(!pedido.filamentoId) return;
+  const fil=state.filamentos.find(f=>f.id===pedido.filamentoId); if(!fil) return;
+  const grams=calcularCustoPedido(pedido).grams; if(grams<=0) return;
+  fil.estoque_g=Math.max(0,(Number(fil.estoque_g)||0)-grams); pedido.descontado=true;
+}
+
+function togglePeca(pedidoId, i) {
+  const p = state.pedidos.find(x => x.id === pedidoId); if (!p || !p.pecas || !p.pecas[i]) return;
+  p.pecas[i].feito = !p.pecas[i].feito;
+  const feitas = p.pecas.filter(x => x.feito).length;
+  if (feitas > 0 && p.status === 'pendente') p.status = 'producao';
+  salvar(); renderPedidos(); verificarAvisoPacote(p, feitas);
+}
+function verificarAvisoPacote(p, feitas) {
+  if (feitas === p.pecas.length && ['pendente', 'producao'].includes(p.status)) {
+    setTimeout(() => {
+      if (confirm('Todas as peças estão prontas. Marcar o pedido como Concluído?')) {
+        p.status = 'concluido'; if (!p.descontado) descontarFilamento(p);
+        salvar(); renderPedidos(); atualizarDashboard();
+      }
+    }, 50);
+  }
+}
+
+function abrirModalFalha(pedidoId) {
+  const p=state.pedidos.find(x=>x.id===pedidoId); if(!p) return; editId=pedidoId;
+  const selFalha=p.pacoteId?`<div class="form-group"><label>Filamento da peça que falhou</label><select id="m-falha-fil"><option value="">— Selecione —</option>${state.filamentos.map(f=>`<option value="${f.id}">${esc(f.material)} ${esc(f.cor)} (${Math.round(f.estoque_g)}g)</option>`).join('')}</select></div>`:'';
+  document.getElementById('modal-content').innerHTML=`<h2>Registrar Falha / Reimpressão</h2><p class="text-sm text-muted mb-3">Desconta filamento do estoque e adiciona custo extra no lucro do pedido.</p>${selFalha}<div class="form-group"><label>Filamento desperdiçado (g) *</label><input id="m-falha-g" type="number" placeholder="Ex: 35"></div><div class="form-group"><label>Tempo perdido (h)</label><input id="m-falha-h" type="number" step="0.1" placeholder="Ex: 1.5"></div><div class="form-group"><label>Motivo / Observação</label><input id="m-falha-motivo" placeholder="Ex: Warping..."></div><div class="modal-actions"><button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button><button class="btn btn-warning" onclick="salvarFalha()">Registrar Falha</button></div>`;
+  document.getElementById('modal').classList.add('open');
+}
+
+function salvarFalha() {
+  const g=Number(document.getElementById('m-falha-g').value); if(!g||g<=0) return alert('Informe os gramas desperdiçados');
+  const h=Number(document.getElementById('m-falha-h').value)||0; const motivo=document.getElementById('m-falha-motivo').value.trim();
+  const p=state.pedidos.find(x=>x.id===editId); if(!p) return;
+  if(!p.falhas) p.falhas=[]; const filId=(document.getElementById('m-falha-fil')||{}).value||p.filamentoId||null;
+  p.falhas.push({id:uid(), data:hoje(), filamento_g:g, tempo_h:h, motivo, filamentoId:filId});
+  if(filId){ const fil=state.filamentos.find(f=>f.id===filId); if(fil) fil.estoque_g=Math.max(0,(Number(fil.estoque_g)||0)-g); }
+  salvar(); fecharModal(); renderPedidos(); alert('Falha registrada e filamento descontado.');
+}
+
+function excluirPedido(id) {
+  const p = state.pedidos.find(x => x.id === id); if (!p) return;
+  if (!confirm('Excluir este pedido?')) return;
+  const vinc = state.transacoes.filter(t => t.pedidoId === id);
+  if (vinc.length && confirm(`Este pedido tem ${vinc.length} lançamento(s) no caixa (${vinc.map(t => formatMoney(t.valor)).join(', ')}). Remover também do caixa?\n\nOK = remover · Cancelar = manter no caixa`)) {
+    state.transacoes = state.transacoes.filter(t => t.pedidoId !== id);
+  }
+  if (p.descontado) {
+    const lista = gramasPorFilamento(p);
+    if (lista.length && confirm(`O filamento deste pedido já foi descontado do estoque (${lista.map(x => Math.round(x.g) + ' g de ' + x.fil.material + ' ' + x.fil.cor).join(', ')}). Devolver ao estoque?\n\nOK = devolver · Cancelar = manter descontado`)) {
+      devolverFilamento(lista);
+    }
+  }
+  state.pedidos = state.pedidos.filter(x => x.id !== id); salvar(); renderPedidos();
+}
+
+document.getElementById('filtro-status').addEventListener('click', e=>{ if(e.target.classList.contains('chip')){ document.querySelectorAll('#filtro-status .chip').forEach(c=>c.classList.remove('active')); e.target.classList.add('active'); filtroStatus=e.target.dataset.status; renderPedidos(); } });
+
+function renderCaixa() {
+  const cats=[...new Set(state.transacoes.map(t=>t.categoria).filter(Boolean))].sort();
+  const meses=[...new Set(state.transacoes.map(t=>(t.data||'').slice(0,7)).filter(Boolean))].sort().reverse();
+  if(!setOpts('f-cx-cat','<option value="todos">Todas categorias</option>'+cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join(''),fCx.cat)) fCx.cat='todos';
+  if(!setOpts('f-cx-mes','<option value="todos">Todos os meses</option>'+meses.map(m=>`<option value="${m}">${mesLabel(m)}</option>`).join(''),fCx.mes)) fCx.mes='todos';
+  const qc=norm(busca.caixa);
+  const base=state.transacoes.filter(t=>{ if(fCx.cat!=='todos'&&t.categoria!==fCx.cat) return false; if(fCx.mes!=='todos'&&(t.data||'').slice(0,7)!==fCx.mes) return false; if(qc&&!norm((t.descricao||'')+' '+(t.categoria||'')).includes(qc)) return false; return true; });
+  let entradas=0, saidas=0; base.forEach(t=>{ if(t.tipo==='entrada') entradas+=Number(t.valor)||0; else saidas+=Number(t.valor)||0; });
+  document.getElementById('caixa-entradas').textContent=formatMoney(entradas); document.getElementById('caixa-saidas').textContent=formatMoney(saidas);
+  let lista=base.slice().sort((a,b)=>(b.data||'').localeCompare(a.data||''));
+  if(filtroCaixa!=='todos') lista=lista.filter(t=>t.tipo===filtroCaixa);
+  const el=document.getElementById('lista-transacoes');
+  if(!lista.length){ el.innerHTML='<div class="empty"><div class="icon">◈</div>Nenhum lançamento ainda.</div>'; return; }
+  el.innerHTML=lista.map(t=>`<div class="list-item"><div class="top"><div><div class="title">${esc(t.descricao||t.categoria||'Lançamento')}</div><div class="meta">${formatDate(t.data)} · ${t.categoria||''}</div></div><div class="value ${t.tipo==='entrada'?'positive':'negative'}" style="font-size:1.05rem">${t.tipo==='entrada'?'+':'−'} ${formatMoney(t.valor)}</div></div><div class="actions"><button class="btn btn-ghost btn-sm" onclick="abrirModalTransacao('${t.id}')">Editar</button><button class="btn btn-danger btn-sm" onclick="excluirTransacao('${t.id}')">Excluir</button></div></div>`).join('');
+}
+
+function abrirModalTransacao(id=null) {
+  editId=id; const t=id?state.transacoes.find(x=>x.id===id):{};
+  document.getElementById('modal-content').innerHTML=`<h2>${id?'Editar':'Novo'} Lançamento</h2><div class="form-group"><label>Tipo</label><select id="m-tipo"><option value="entrada" ${t.tipo==='entrada'?'selected':''}>Entrada (receita)</option><option value="saida" ${t.tipo==='saida'?'selected':''}>Saída (despesa)</option></select></div><div class="form-group"><label>Valor (R$) *</label><input id="m-valor" type="number" step="0.01" value="${t.valor||''}"></div><div class="form-group"><label>Data</label><input id="m-data" type="date" value="${t.data||hoje()}"></div><div class="form-group"><label>Categoria</label><select id="m-cat"><option value="Venda" ${t.categoria==='Venda'?'selected':''}>Venda</option><option value="Filamento" ${t.categoria==='Filamento'?'selected':''}>Filamento</option><option value="Equipamento" ${t.categoria==='Equipamento'?'selected':''}>Equipamento</option><option value="Manutenção" ${t.categoria==='Manutenção'?'selected':''}>Manutenção</option><option value="Energia" ${t.categoria==='Energia'?'selected':''}>Energia</option><option value="Marketing" ${t.categoria==='Marketing'?'selected':''}>Marketing</option><option value="Frete" ${t.categoria==='Frete'?'selected':''}>Frete</option><option value="Outros" ${t.categoria==='Outros'?'selected':''}>Outros</option></select></div><div class="form-group"><label>Descrição</label><input id="m-desc" value="${esc(t.descricao||'')}" placeholder="Ex: Compra de 2kg PLA"></div><div class="modal-actions"><button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarTransacao()">Salvar</button></div>`;
+  document.getElementById('modal').classList.add('open');
+}
+
+function salvarTransacao() {
+  const valor=Number(document.getElementById('m-valor').value); if(!valor||valor<=0) return alert('Valor inválido');
+  const dados={ tipo:document.getElementById('m-tipo').value, valor, data:document.getElementById('m-data').value, categoria:document.getElementById('m-cat').value, descricao:document.getElementById('m-desc').value.trim() };
+  if(editId){ const idx=state.transacoes.findIndex(x=>x.id===editId); state.transacoes[idx]={...state.transacoes[idx],...dados}; }
+  else state.transacoes.push({id:uid(),...dados});
+  salvar(); fecharModal(); renderCaixa();
+}
+
+function excluirTransacao(id){ if(!confirm('Excluir este lançamento?')) return; state.transacoes=state.transacoes.filter(x=>x.id!==id); salvar(); renderCaixa(); }
+
+document.getElementById('filtro-caixa').addEventListener('click', e=>{ if(e.target.classList.contains('chip')){ document.querySelectorAll('#filtro-caixa .chip').forEach(c=>c.classList.remove('active')); e.target.classList.add('active'); filtroCaixa=e.target.dataset.tipo; renderCaixa(); } });
+
+function renderFilamentos() {
+  const el=document.getElementById('lista-filamentos');
+  const mats=[...new Set(state.filamentos.map(f=>f.material).filter(Boolean))].sort();
+  if(!setOpts('f-fil-mat','<option value="todos">Todos materiais</option>'+mats.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join(''),fFil.material)) fFil.material='todos';
+  if(!state.filamentos.length){ el.innerHTML='<div class="empty"><div class="icon">◉</div>Nenhum filamento cadastrado.</div>'; return; }
+  const qf=norm(busca.filamentos);
+  const listaF=state.filamentos.filter(f=>(!qf||norm((f.material||'')+' '+(f.cor||'')).includes(qf)) && (fFil.material==='todos'||f.material===fFil.material) && (fFil.baixo!=='baixo'||(Number(f.estoque_g)||0)<(Number(f.alerta_g)||200)));
+  if(!listaF.length){ el.innerHTML='<div class="empty">Nenhum filamento encontrado.</div>'; return; }
+  el.innerHTML=listaF.map(f=>{
+    const baixo=(Number(f.estoque_g)||0)<(Number(f.alerta_g)||200);
+    return `<div class="list-item"><div class="top"><div><div class="title">${esc(f.material||'')} — ${esc(f.cor||'')}</div><div class="meta">Custo: ${formatMoney(f.custo_kg)} / kg · Alerta: ${f.alerta_g||200}g</div></div><div class="value ${baixo?'warning-text':''}" style="font-size:1.1rem">${Number(f.estoque_g)>=1000?(f.estoque_g/1000).toFixed(2)+' kg':Math.round(f.estoque_g)+' g'}</div></div>${baixo?'<div class="meta warning-text">⚠ Estoque baixo</div>':''}<div class="actions"><button class="btn btn-ghost btn-sm" onclick="abrirModalFilamento('${f.id}')">Editar</button><button class="btn btn-danger btn-sm" onclick="excluirFilamento('${f.id}')">Excluir</button></div></div>`;
+  }).join('');
+}
+
+function abrirModalFilamento(id=null) {
+  editId=id; const f=id?state.filamentos.find(x=>x.id===id):{};
+  document.getElementById('modal-content').innerHTML=`<h2>${id?'Editar':'Novo'} Filamento</h2><div class="form-group"><label>Material *</label><select id="m-material"><option value="PLA" ${f.material==='PLA'?'selected':''}>PLA</option><option value="PETG" ${f.material==='PETG'?'selected':''}>PETG</option><option value="ABS" ${f.material==='ABS'?'selected':''}>ABS</option><option value="TPU" ${f.material==='TPU'?'selected':''}>TPU</option><option value="ASA" ${f.material==='ASA'?'selected':''}>ASA</option><option value="Outro" ${f.material==='Outro'?'selected':''}>Outro</option></select></div><div class="form-group"><label>Cor *</label><input id="m-cor" value="${esc(f.cor||'')}" placeholder="Preto, Branco..."></div><div class="form-row"><div class="form-group"><label>Estoque atual (g)</label><input id="m-estoque" type="number" value="${f.estoque_g||0}"></div><div class="form-group"><label>Custo por kg (R$)</label><input id="m-custo" type="number" step="0.01" value="${f.custo_kg||''}"></div></div><div class="form-group"><label>Alerta de estoque baixo (g)</label><input id="m-alerta" type="number" value="${f.alerta_g||200}"></div><div class="modal-actions"><button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarFilamento()">Salvar</button></div>`;
+  document.getElementById('modal').classList.add('open');
+}
+
+function salvarFilamento() {
+  const cor=document.getElementById('m-cor').value.trim(); if(!cor) return alert('Cor é obrigatória');
+  const dados={ material:document.getElementById('m-material').value, cor, estoque_g:Number(document.getElementById('m-estoque').value)||0, custo_kg:Number(document.getElementById('m-custo').value)||0, alerta_g:Number(document.getElementById('m-alerta').value)||200 };
+  if(editId){ const idx=state.filamentos.findIndex(x=>x.id===editId); state.filamentos[idx]={...state.filamentos[idx],...dados}; }
+  else state.filamentos.push({id:uid(),...dados});
+  salvar(); fecharModal(); renderFilamentos();
+}
+
+function excluirFilamento(id){ if(!confirm('Excluir este filamento?')) return; state.filamentos=state.filamentos.filter(x=>x.id!==id); salvar(); renderFilamentos(); }
+
+function renderRelatorio() {
+  const el=document.getElementById('conteudo-relatorio');
+  if(filtroRel==='projetos'){
+    const map={}; state.pedidos.forEach(p=>{ if(p.status==='cancelado') return; const key=p.pacoteId?('pac:'+p.pacoteId):(p.projetoId||'avulso'); const nome=p.pacoteId?('Pacote · '+(p.pacoteNome||'sem nome')):(p.projetoNome||(state.projetos.find(x=>x.id===p.projetoId)?.nome)||'Avulso'); if(!map[key]) map[key]={nome,qtd:0,receita:0,custo:0,lucro:0,pedidos:0}; const c=calcularCustoPedido(p); map[key].qtd+=(p.qtd||1); map[key].receita+=c.receita; map[key].custo+=c.custoTotal; map[key].lucro+=c.lucro; map[key].pedidos+=1; });
+    const rows=Object.values(map).sort((a,b)=>b.lucro-a.lucro);
+    if(!rows.length){ el.innerHTML='<div class="empty">Nenhum dado para relatório ainda.</div>'; return; }
+    el.innerHTML=`<div class="card"><table><thead><tr><th>Projeto</th><th class="num">Pedidos</th><th class="num">Receita</th><th class="num">Custo</th><th class="num">Lucro</th><th class="num">Margem</th></tr></thead><tbody>${rows.map(r=>{ const margem=r.receita>0?(r.lucro/r.receita*100):0; return `<tr><td>${esc(r.nome)}</td><td class="num">${r.pedidos}</td><td class="num">${formatMoney(r.receita)}</td><td class="num">${formatMoney(r.custo)}</td><td class="num ${r.lucro>=0?'profit-positive':'profit-negative'}">${formatMoney(r.lucro)}</td><td class="num">${margem.toFixed(0)}%</td></tr>`; }).join('')}</tbody></table></div><p class="text-sm text-muted mt-3">* Custo = filamento + energia + hora máquina + taxa de falha + frete + falhas.</p>`;
+  } else {
+    const map={}; state.pedidos.forEach(p=>{ if(p.status==='cancelado') return; const key=(p.cliente||'Sem nome').toLowerCase(); if(!map[key]) map[key]={nome:p.cliente||'Sem nome',tipo:p.tipo_cliente||'pf',qtd:0,receita:0,custo:0,lucro:0,pedidos:0}; const c=calcularCustoPedido(p); map[key].qtd+=(p.qtd||1); map[key].receita+=c.receita; map[key].custo+=c.custoTotal; map[key].lucro+=c.lucro; map[key].pedidos+=1; });
+    const rows=Object.values(map).sort((a,b)=>b.lucro-a.lucro);
+    if(!rows.length){ el.innerHTML='<div class="empty">Nenhum dado para relatório ainda.</div>'; return; }
+    el.innerHTML=`<div class="card"><table><thead><tr><th>Cliente</th><th></th><th class="num">Pedidos</th><th class="num">Receita</th><th class="num">Lucro</th><th class="num">Margem</th></tr></thead><tbody>${rows.map(r=>{ const margem=r.receita>0?(r.lucro/r.receita*100):0; const tag=r.tipo==='pj'?'<span class="tag-pj">PJ</span>':'<span class="tag-pf">PF</span>'; return `<tr><td>${esc(r.nome)}</td><td>${tag}</td><td class="num">${r.pedidos}</td><td class="num">${formatMoney(r.receita)}</td><td class="num ${r.lucro>=0?'profit-positive':'profit-negative'}">${formatMoney(r.lucro)}</td><td class="num">${margem.toFixed(0)}%</td></tr>`; }).join('')}</tbody></table></div>`;
+  }
+}
+
+document.getElementById('filtro-relatorio').addEventListener('click', e=>{ if(e.target.classList.contains('chip')){ document.querySelectorAll('#filtro-relatorio .chip').forEach(c=>c.classList.remove('active')); e.target.classList.add('active'); filtroRel=e.target.dataset.rel; renderRelatorio(); } });
+
+function salvarConfig() {
+  state.config.nome=document.getElementById('cfg-nome').value.trim()||'Lupi 3D';
+  state.config.custo_energia_hora=Number(document.getElementById('cfg-energia').value)||0;
+  state.config.custo_hora_maquina=Number(document.getElementById('cfg-maquina').value)||0;
+  state.config.taxa_falha=Number(document.getElementById('cfg-falha').value)||0;
+  { const mv=document.getElementById('cfg-margem').value; state.config.margem_desejada=(mv===''?50:Number(mv)||0); }
+  salvar(); alert('Configurações salvas na nuvem!');
+}
+
+function exportarDados() {
+  const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`lupi3d-backup-${hoje()}.json`; a.click();
+}
+
+function limparTudo() {
+  if(!confirm('APAGAR TODOS OS DADOS DA NUVEM?')) return;
+  if(!confirm('Tem certeza absoluta? Isso apaga para você e para sua esposa.')) return;
+  state=JSON.parse(JSON.stringify(defaultState)); salvar(); alert('Dados apagados da nuvem.'); navegar('dashboard');
+}
+
+function pedirPermissaoNotificacao() {
+  if(!('Notification' in window)) return alert('Seu navegador não suporta notificações.');
+  Notification.requestPermission().then(perm=>{ if(perm==='granted'){ alert('Notificações ativadas!'); verificarNotificacoes(); } else alert('Permissão negada.'); });
+}
+
+function verificarNotificacoes() {
+  if(Notification.permission!=='granted') return;
+  state.pedidos.filter(p=>{ if(['entregue','cancelado'].includes(p.status)) return false; const d=diasRestantes(p.prazo); return d!==null && d<=1; }).forEach(p=>{
+    const d=diasRestantes(p.prazo); const titulo=d<0?'Pedido ATRASADO':d===0?'Pedido vence HOJE':'Pedido vence amanhã';
+    new Notification('Lupi 3D — '+titulo, { body:`${p.cliente} — prazo ${formatDate(p.prazo)}` });
+  });
+}
+
+function fecharModal(){ document.getElementById('modal').classList.remove('open'); editId=null; }
+
+function atualizarTudo() {
+  if (document.getElementById('modal').classList.contains('open') && Date.now() - ultimoSalvar > 4000) mostrarToast('⚠ Outra pessoa acabou de atualizar os dados. Se for salvar este item, feche e abra de novo para ver a versão mais recente.');
+  const active=document.querySelector('.page.active'); if(!active) return;
+  const id=active.id.replace('page-','');
+  if(id==='dashboard') atualizarDashboard(); else if(id==='projetos') renderProjetos(); else if(id==='pedidos') renderPedidos();
+  else if(id==='caixa') renderCaixa(); else if(id==='filamento') renderFilamentos(); else if(id==='relatorios') renderRelatorio();
+}
+
+document.getElementById('modal').addEventListener('click', e=>{ if(e.target.id==='modal') fecharModal(); });
+
+function bindFiltros() {
+  const on = (id, ev, fn) => document.getElementById(id).addEventListener(ev, fn);
+  on('busca-projetos', 'input', e => { busca.projetos = e.target.value; renderProjetos(); });
+  on('busca-pedidos', 'input', e => { busca.pedidos = e.target.value; renderPedidos(); });
+  on('busca-caixa', 'input', e => { busca.caixa = e.target.value; renderCaixa(); });
+  on('busca-filamentos', 'input', e => { busca.filamentos = e.target.value; renderFilamentos(); });
+  on('f-ped-tipo', 'change', e => { fPed.tipo = e.target.value; renderPedidos(); });
+  on('f-ped-pago', 'change', e => { fPed.pago = e.target.value; renderPedidos(); });
+  on('f-ped-periodo', 'change', e => { fPed.periodo = e.target.value; renderPedidos(); });
+  on('f-cx-cat', 'change', e => { fCx.cat = e.target.value; renderCaixa(); });
+  on('f-cx-mes', 'change', e => { fCx.mes = e.target.value; renderCaixa(); });
+  on('f-fil-mat', 'change', e => { fFil.material = e.target.value; renderFilamentos(); });
+  on('f-fil-baixo', 'change', e => { fFil.baixo = e.target.value; renderFilamentos(); });
+  on('filtro-catalogo', 'click', e => {
+    const b = e.target.closest('.chip'); if (!b) return;
+    abaCatalogo = b.dataset.aba; busca.projetos = ''; document.getElementById('busca-projetos').value = '';
+    renderProjetos();
+  });
+}
+bindFiltros();
+
+// ===== Aviso de edição simultânea (não altera o salvamento) =====
+let ultimoSalvar = 0, toastTimer = null;
+const _salvarOriginal = salvar;
+salvar = function () { ultimoSalvar = Date.now(); return _salvarOriginal.apply(this, arguments); };
+function mostrarToast(msg, ms = 8000) {
+  const t = document.getElementById('toast'); t.textContent = msg; t.classList.remove('hidden');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add('hidden'), ms);
+}
+
+// ===== Alerta de estoque baixo =====
+function renderAlertasEstoque() {
+  const el = document.getElementById('alertas-estoque');
+  const baixos = state.filamentos.filter(f => (Number(f.estoque_g) || 0) < (Number(f.alerta_g) || 200)).sort((a, b) => (Number(a.estoque_g) || 0) - (Number(b.estoque_g) || 0));
+  el.innerHTML = baixos.length ? `<div class="alert-box" style="cursor:pointer" onclick="navegar('filamento')">⚠ <strong>Estoque baixo:</strong> ${baixos.map(f => `${esc(f.material)} ${esc(f.cor)} (${Math.round(Number(f.estoque_g) || 0)} g)`).join(' · ')}</div>` : '';
+}
+
+// ===== Preço sugerido =====
+function margemDesejada() {
+  const raw = state.config.margem_desejada;
+  const m = (raw === undefined || raw === null || raw === '') ? 50 : (Number(raw) || 0);
+  return Math.min(Math.max(m, 0), 95);
+}
+function custoEstimadoProjeto(g, h) {
+  const cfg = state.config;
+  const kgs = state.filamentos.map(f => Number(f.custo_kg) || 0).filter(x => x > 0);
+  const ck = kgs.length ? kgs.reduce((a, b) => a + b, 0) / kgs.length : 0;
+  const base = (g / 1000) * ck + h * ((Number(cfg.custo_energia_hora) || 0) + (Number(cfg.custo_hora_maquina) || 0));
+  return { custo: base * (1 + (Number(cfg.taxa_falha) || 0) / 100), semFil: !kgs.length };
+}
+function precoSugerido(custo) { return Math.ceil((custo / (1 - margemDesejada() / 100)) * 10) / 10; }
+function infoCustoProjeto(p) {
+  const g = Number(p.filamento_g) || 0, h = Number(p.tempo_h) || 0, preco = Number(p.preco) || 0;
+  if ((!g && !h) || preco <= 0) return '';
+  const { custo } = custoEstimadoProjeto(g, h);
+  return ` · custo ~${formatMoney(custo)} · margem ${((preco - custo) / preco * 100).toFixed(0)}%`;
+}
+function iniciarSugestao() {
+  const box = document.getElementById('sugestao-preco');
+  const calc = () => {
+    const g = Number(document.getElementById('m-filamento').value) || 0, h = Number(document.getElementById('m-tempo').value) || 0;
+    if (!g && !h) { box.innerHTML = 'Preencha filamento e tempo para ver o preço sugerido.'; return; }
+    const { custo, semFil } = custoEstimadoProjeto(g, h); const sug = precoSugerido(custo);
+    box.innerHTML = `Custo estimado: <strong>${formatMoney(custo)}</strong> · Margem desejada: ${margemDesejada()}%<br>Preço sugerido: <strong>${formatMoney(sug)}</strong> <button class="btn btn-ghost btn-sm" style="margin-left:6px" onclick="usarPrecoSugerido(${sug})">Usar</button>${semFil ? '<br><small>Cadastre um filamento com custo por kg para incluir o material no cálculo.</small>' : '<br><small>Material: custo médio dos seus filamentos.</small>'}`;
+  };
+  ['m-filamento', 'm-tempo'].forEach(id => document.getElementById(id).addEventListener('input', calc));
+  calc();
+}
+function usarPrecoSugerido(v) { document.getElementById('m-preco').value = Number(v).toFixed(2); }
+
+// ===== Avançar status =====
+function botaoAvancar(p) {
+  const t = { pendente: '▶ Iniciar', producao: '✓ Concluir', concluido: '→ Entregue' }[p.status];
+  return t ? `<button class="btn btn-success btn-sm" onclick="avancarStatus('${p.id}')">${t}</button>` : '';
+}
+function avancarStatus(id) {
+  const p = state.pedidos.find(x => x.id === id); if (!p) return;
+  const prox = { pendente: 'producao', producao: 'concluido', concluido: 'entregue' }[p.status]; if (!prox) return;
+  if (prox === 'concluido') {
+    if (p.pacoteId && p.pecas && p.pecas.some(x => !x.feito)) {
+      if (!confirm('Há peças do pacote ainda não marcadas como prontas. Concluir o pedido mesmo assim?')) return;
+      p.pecas.forEach(x => { x.feito = true; });
+    }
+    p.status = 'concluido'; if (!p.descontado) descontarFilamento(p);
+  } else if (prox === 'entregue') {
+    p.status = 'entregue';
+    if (!p.pago && (Number(p.valor) || 0) > 0 && confirm('Este pedido já foi pago? OK = registrar a entrada no caixa.')) {
+      p.pago = true;
+      state.transacoes.push({ id: uid(), tipo: 'entrada', valor: Number(p.valor) || 0, data: hoje(), categoria: 'Venda', descricao: `Pedido - ${p.cliente} (${p.pacoteNome || p.projetoNome || 'avulso'})`, pedidoId: p.id });
+    }
+  } else p.status = prox;
+  salvar(); renderPedidos(); atualizarDashboard();
+}
+
+// ===== Devolver filamento =====
+function gramasPorFilamento(p) {
+  const acc = {}; const add = (id, g) => { if (id && g > 0) acc[id] = (acc[id] || 0) + g; };
+  if (p.pacoteId && p.pecas && p.pecas.length) {
+    const gDe = pc => { const pr = state.projetos.find(x => x.id === pc.projetoId); return pr ? (Number(pr.filamento_g) || 0) : 0; };
+    const gAuto = p.pecas.reduce((a, pc) => a + gDe(pc), 0); const manual = Number(p.filamento_g) || 0;
+    const fator = manual > 0 ? (gAuto > 0 ? manual / gAuto : 0) : 1;
+    p.pecas.forEach(pc => add(pc.filamentoId, gDe(pc) * fator));
+  } else add(p.filamentoId, calcularCustoPedido(p).grams);
+  return Object.entries(acc).filter(([id]) => state.filamentos.some(f => f.id === id)).map(([id, g]) => ({ id, g, fil: state.filamentos.find(f => f.id === id) }));
+}
+function devolverFilamento(lista) { lista.forEach(x => { x.fil.estoque_g = (Number(x.fil.estoque_g) || 0) + x.g; }); }
+
+// ===== Duplicar =====
+function duplicarPedido(id) {
+  const p = state.pedidos.find(x => x.id === id); if (!p) return;
+  const base = JSON.parse(JSON.stringify(p));
+  delete base.id; base.status = 'pendente'; base.pago = false; base.descontado = false; base.falhas = [];
+  base.data = ''; base.prazo = ''; base.filamento_g = null; base.tempo_h = null;
+  base.pecas = (base.pecas || []).map(x => ({ ...x, feito: false }));
+  abrirModalPedido(null, base);
+}
+function duplicarProjeto(id) {
+  const p = state.projetos.find(x => x.id === id); if (!p) return;
+  state.projetos.push({ ...JSON.parse(JSON.stringify(p)), id: uid(), nome: p.nome + ' (cópia)' });
+  salvar(); renderProjetos();
+}
+function duplicarPacote(id) {
+  const k = state.pacotes.find(x => x.id === id); if (!k) return;
+  state.pacotes.push({ ...JSON.parse(JSON.stringify(k)), id: uid(), nome: k.nome + ' (cópia)' });
+  salvar(); renderProjetos();
+}
+
+// ===== Importar backup =====
+function importarDados(inp) {
+  const f = inp.files && inp.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    inp.value = '';
+    let d; try { d = JSON.parse(r.result); } catch (e) { return alert('Este arquivo não é um backup válido (não consegui ler).'); }
+    const ok = d && typeof d === 'object' && ['projetos', 'pedidos', 'transacoes', 'filamentos'].some(k => Array.isArray(d[k]));
+    if (!ok) return alert('Este arquivo não parece um backup do Lupi 3D.');
+    const n = k => Array.isArray(d[k]) ? d[k].length : 0;
+    const resumo = `${n('projetos')} projetos, ${n('pacotes')} pacotes, ${n('pedidos')} pedidos, ${n('transacoes')} lançamentos, ${n('filamentos')} filamentos`;
+    if (!confirm(`Importar este backup?\n\n${resumo}\n\nISSO SUBSTITUI TODOS os dados atuais, para todos que usam o app. Antes disso, vou baixar um backup dos dados atuais.`)) return;
+    exportarDados();
+    state = { config: { ...defaultState.config, ...(d.config || {}) }, projetos: d.projetos || [], pacotes: d.pacotes || [], pedidos: d.pedidos || [], transacoes: d.transacoes || [], filamentos: d.filamentos || [] };
+    salvar(); atualizarTudo(); alert('Backup importado e salvo na nuvem.');
+  };
+  r.readAsText(f);
+}
+
+iniciarFirebase();
+</script>
+</body>
+</html>
