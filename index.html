@@ -117,17 +117,13 @@
 
   <div id="page-dashboard" class="page active">
     <div id="alertas-prazo"></div>
-    <div id="alertas-estoque"></div>
     <div class="grid grid-2 mb-3">
       <div class="card"><h3>Saldo Atual</h3><div class="value" id="dash-saldo">R$ 0,00</div></div>
       <div class="card"><h3>Lucro do Mês</h3><div class="value" id="dash-lucro">R$ 0,00</div></div>
       <div class="card"><h3>Receita Mês</h3><div class="value positive" id="dash-receita">R$ 0,00</div></div>
       <div class="card"><h3>Despesas Mês</h3><div class="value negative" id="dash-despesa">R$ 0,00</div></div>
     </div>
-    <div class="grid grid-2 mb-3">
-      <div class="card"><h3>Pedidos Ativos</h3><div class="value" id="dash-ativos">0</div><div class="sub" id="dash-atrasados">0 atrasados</div></div>
-      <div class="card"><h3>Estoque Filamento</h3><div class="value" id="dash-estoque">0 g</div><div class="sub" id="dash-estoque-sub">—</div></div>
-    </div>
+    <div class="card mb-3"><h3>Pedidos Ativos</h3><div class="value" id="dash-ativos">0</div><div class="sub" id="dash-atrasados">0 atrasados</div></div>
     <div class="card mb-3"><h3>Status dos Pedidos</h3><div class="chart-container"><canvas id="chart-status"></canvas></div></div>
     <div class="card mb-3"><h3>Receita × Despesa (6 meses)</h3><div class="chart-container"><canvas id="chart-fluxo"></canvas></div></div>
     <div class="card"><h3>Top Projetos por Filamento</h3><div class="chart-container"><canvas id="chart-projetos"></canvas></div></div>
@@ -182,11 +178,10 @@
   </div>
 
   <div id="page-filamento" class="page">
-    <div class="section-header"><h2>Estoque de Filamento</h2><button class="btn btn-primary btn-sm" onclick="abrirModalFilamento()">+ Novo</button></div>
+    <div class="section-header"><h2>Filamentos</h2><button class="btn btn-primary btn-sm" onclick="abrirModalFilamento()">+ Novo</button></div>
     <div class="search-box"><input type="search" id="busca-filamentos" placeholder="Buscar cor ou material..."></div>
     <div class="filters-row">
       <select id="f-fil-mat"><option value="todos">Todos materiais</option></select>
-      <select id="f-fil-baixo"><option value="todos">Todos os estoques</option><option value="baixo">Só estoque baixo</option></select>
     </div>
     <div id="lista-filamentos"></div>
   </div>
@@ -238,7 +233,7 @@
     <button data-page="projetos" onclick="navegar('projetos')"><span class="icon">◈</span> Projetos</button>
     <button data-page="pedidos" onclick="navegar('pedidos')"><span class="icon">▣</span> Pedidos<span class="nav-badge hidden" id="nav-badge-atrasados">0</span></button>
     <button data-page="caixa" onclick="navegar('caixa')"><span class="icon">◈</span> Caixa</button>
-    <button data-page="filamento" onclick="navegar('filamento')"><span class="icon">◉</span> Estoque</button>
+    <button data-page="filamento" onclick="navegar('filamento')"><span class="icon">◉</span> Filamento</button>
     <button data-page="relatorios" onclick="navegar('relatorios')"><span class="icon">◇</span> Lucro</button>
     <button data-page="config" onclick="navegar('config')"><span class="icon">⚙</span> Config</button>
   </nav>
@@ -274,7 +269,7 @@ let abaCatalogo = 'projetos';
 let busca = { projetos: '', pedidos: '', caixa: '', filamentos: '' };
 let fPed = { tipo: 'todos', pago: 'todos', periodo: 'todos' };
 let fCx = { cat: 'todos', mes: 'todos' };
-let fFil = { material: 'todos', baixo: 'todos' };
+let fFil = { material: 'todos' };
 let itensTemp = [], pecasModal = [];
 
 function iniciarFirebase() {
@@ -346,13 +341,13 @@ function esc(str) { if (!str) return ''; return String(str).replace(/&/g,'&amp;'
 function calcularCustoPedido(p) {
   const cfg = state.config;
   const proj = state.projetos.find(x => x.id === p.projetoId);
-  const fil = state.filamentos.find(x => x.id === p.filamentoId);
+  const fil = state.filamentos.find(x => x.id === (p.filamentoId || (proj && proj.filamentoId)));
   const ePac = !!(p.pacoteId && p.pecas && p.pecas.length);
   let gAuto = 0, hAuto = 0, cFilAuto = 0; const kgs = [];
   if (ePac) {
     p.pecas.forEach(pc => {
       const pr = state.projetos.find(x => x.id === pc.projetoId);
-      const f = state.filamentos.find(x => x.id === pc.filamentoId);
+      const f = state.filamentos.find(x => x.id === (pc.filamentoId || (pr && pr.filamentoId)));
       const g = pr ? (Number(pr.filamento_g) || 0) : 0, h = pr ? (Number(pr.tempo_h) || 0) : 0;
       const ck = f ? (Number(f.custo_kg) || 0) : 0;
       gAuto += g; hAuto += h; cFilAuto += (g / 1000) * ck; if (f) kgs.push(ck);
@@ -406,12 +401,6 @@ function atualizarDashboard() {
   const lucro = receitaMes - despesaMes;
   const ativos = state.pedidos.filter(p => !['entregue','cancelado'].includes(p.status)).length;
   const atrasados = state.pedidos.filter(p => isAtrasado(p.prazo, p.status)).length;
-  const estoqueTotal = state.filamentos.reduce((s,f) => s + (Number(f.estoque_g)||0), 0);
-  const trinta = new Date(); trinta.setDate(trinta.getDate()-30);
-  let consumo30 = 0;
-  state.pedidos.forEach(p => { if (['concluido','entregue'].includes(p.status) && p.data && new Date(p.data)>=trinta) consumo30 += calcularCustoPedido(p).grams; });
-  const mediaDia = consumo30/30;
-  const diasEst = mediaDia>0 ? Math.floor(estoqueTotal/mediaDia) : null;
 
   document.getElementById('dash-saldo').textContent = formatMoney(saldo);
   document.getElementById('dash-saldo').className = 'value ' + (saldo>=0?'positive':'negative');
@@ -422,13 +411,11 @@ function atualizarDashboard() {
   document.getElementById('dash-ativos').textContent = ativos;
   document.getElementById('dash-atrasados').textContent = atrasados + ' atrasado' + (atrasados!==1?'s':'');
   document.getElementById('dash-atrasados').className = 'sub ' + (atrasados>0?'warning-text':'');
-  document.getElementById('dash-estoque').textContent = estoqueTotal>=1000 ? (estoqueTotal/1000).toFixed(1)+' kg' : Math.round(estoqueTotal)+' g';
-  document.getElementById('dash-estoque-sub').textContent = diasEst!==null ? `~${diasEst} dias de estoque` : 'Sem histórico de consumo';
   document.getElementById('header-badge').textContent = ativos + ' ativo' + (ativos!==1?'s':'');
   document.getElementById('header-badge').className = 'badge' + (atrasados>0?' alert':'');
   const badge = document.getElementById('nav-badge-atrasados');
   if (atrasados>0) { badge.textContent=atrasados; badge.classList.remove('hidden'); } else badge.classList.add('hidden');
-  renderAlertasPrazo(); renderAlertasEstoque(); renderChartStatus(); renderChartFluxo(); renderChartProjetos();
+  renderAlertasPrazo(); renderChartStatus(); renderChartFluxo(); renderChartProjetos();
 }
 
 function renderAlertasPrazo() {
@@ -488,7 +475,7 @@ function renderProjetos() {
   const q = norm(busca.projetos);
   const lista = state.projetos.filter(p => !q || norm(p.nome + ' ' + (p.descricao || '')).includes(q));
   if (!lista.length) { el.innerHTML = '<div class="empty">Nenhum projeto encontrado.</div>'; return; }
-  el.innerHTML = lista.map(p => `<div class="list-item"><div class="top"><div><div class="title">${esc(p.nome)}</div><div class="meta">${p.filamento_g||0} g · ${p.tempo_h||0} h · ${formatMoney(p.preco)}${infoCustoProjeto(p)}</div></div></div>${p.descricao?`<div class="meta">${esc(p.descricao)}</div>`:''}<div class="actions"><button class="btn btn-ghost btn-sm" onclick="abrirModalProjeto('${p.id}')">Editar</button><button class="btn btn-ghost btn-sm" onclick="duplicarProjeto('${p.id}')">Duplicar</button><button class="btn btn-danger btn-sm" onclick="excluirProjeto('${p.id}')">Excluir</button></div></div>`).join('');
+  el.innerHTML = lista.map(p => `<div class="list-item"><div class="top"><div><div class="title">${esc(p.nome)}</div><div class="meta">${p.filamento_g||0} g${nomeFilProj(p)} · ${p.tempo_h||0} h · ${formatMoney(p.preco)}${infoCustoProjeto(p)}</div></div></div>${avisoFilProj(p)}${p.descricao?`<div class="meta">${esc(p.descricao)}</div>`:''}<div class="actions"><button class="btn btn-ghost btn-sm" onclick="abrirModalProjeto('${p.id}')">Editar</button><button class="btn btn-ghost btn-sm" onclick="duplicarProjeto('${p.id}')">Duplicar</button><button class="btn btn-danger btn-sm" onclick="excluirProjeto('${p.id}')">Excluir</button></div></div>`).join('');
 }
 
 function renderPacotes() {
@@ -542,14 +529,15 @@ function excluirPacote(id) {
 
 function abrirModalProjeto(id=null) {
   editId=id; const p=id?state.projetos.find(x=>x.id===id):{};
-  document.getElementById('modal-content').innerHTML=`<h2>${id?'Editar':'Novo'} Projeto</h2><div class="form-group"><label>Nome *</label><input id="m-nome" value="${esc(p.nome||'')}" placeholder="Ex: Suporte de celular"></div><div class="form-group"><label>Descrição</label><textarea id="m-desc">${esc(p.descricao||'')}</textarea></div><div class="form-row"><div class="form-group"><label>Filamento médio (g)</label><input id="m-filamento" type="number" value="${p.filamento_g||''}" placeholder="45"></div><div class="form-group"><label>Tempo médio (h)</label><input id="m-tempo" type="number" step="0.1" value="${p.tempo_h||''}" placeholder="3.5"></div></div><div class="form-group"><label>Preço de venda (R$)</label><input id="m-preco" type="number" step="0.01" value="${p.preco||''}" placeholder="49.90"></div><div id="sugestao-preco" class="alert-box"></div><div class="modal-actions"><button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarProjeto()">Salvar</button></div>`;
+  const optsFilProj=state.filamentos.map(f=>`<option value="${f.id}" ${p.filamentoId===f.id?'selected':''}>${esc(f.material)} ${esc(f.cor)} — ${formatMoney(f.custo_kg)}/kg</option>`).join('');
+  document.getElementById('modal-content').innerHTML=`<h2>${id?'Editar':'Novo'} Projeto</h2><div class="form-group"><label>Nome *</label><input id="m-nome" value="${esc(p.nome||'')}" placeholder="Ex: Suporte de celular"></div><div class="form-group"><label>Descrição</label><textarea id="m-desc">${esc(p.descricao||'')}</textarea></div><div class="form-group"><label>Filamento (puxa o preço por kg)</label><select id="m-fil-proj"><option value="">— Selecione —</option>${optsFilProj}</select>${state.filamentos.length?'':'<div class="text-sm text-muted mt-2">Cadastre um filamento na aba Filamento para escolher aqui.</div>'}</div><div class="form-row"><div class="form-group"><label>Filamento médio (g)</label><input id="m-filamento" type="number" value="${p.filamento_g||''}" placeholder="45"></div><div class="form-group"><label>Tempo médio (h)</label><input id="m-tempo" type="number" step="0.1" value="${p.tempo_h||''}" placeholder="3.5"></div></div><div class="form-group"><label>Preço de venda (R$)</label><input id="m-preco" type="number" step="0.01" value="${p.preco||''}" placeholder="49.90"></div><div id="sugestao-preco" class="alert-box"></div><div class="modal-actions"><button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarProjeto()">Salvar</button></div>`;
   iniciarSugestao();
   document.getElementById('modal').classList.add('open');
 }
 
 function salvarProjeto() {
   const nome=document.getElementById('m-nome').value.trim(); if(!nome) return alert('Nome é obrigatório');
-  const dados={ nome, descricao:document.getElementById('m-desc').value.trim(), filamento_g:Number(document.getElementById('m-filamento').value)||0, tempo_h:Number(document.getElementById('m-tempo').value)||0, preco:Number(document.getElementById('m-preco').value)||0 };
+  const dados={ nome, descricao:document.getElementById('m-desc').value.trim(), filamentoId:document.getElementById('m-fil-proj').value||null, filamento_g:Number(document.getElementById('m-filamento').value)||0, tempo_h:Number(document.getElementById('m-tempo').value)||0, preco:Number(document.getElementById('m-preco').value)||0 };
   if(editId){ const idx=state.projetos.findIndex(x=>x.id===editId); state.projetos[idx]={...state.projetos[idx],...dados}; }
   else state.projetos.push({id:uid(),...dados});
   salvar(); fecharModal(); renderProjetos();
@@ -582,7 +570,7 @@ function renderPedidos() {
     const atrasado=isAtrasado(p.prazo,p.status); const statusClass=atrasado?'status-atrasado':'status-'+p.status; const statusLabel=atrasado?'ATRASADO':p.status;
     const tipoTag=(p.tipo_cliente==='pj'?'<span class="tag-pj">PJ</span>':'<span class="tag-pf">PF</span>')+(p.pacoteId?' <span class="tag-pk">PACOTE</span>':'');
     const custo=calcularCustoPedido(p);
-    const checklist=(p.pacoteId&&p.pecas&&p.pecas.length)?(()=>{ const feitas=p.pecas.filter(x=>x.feito).length; return `<div class="checklist"><div class="check-head">Peças prontas: ${feitas}/${p.pecas.length}</div>`+p.pecas.map((pc,i)=>{ const f=state.filamentos.find(x=>x.id===pc.filamentoId); const extra=[(p.qtd>1?'pacote '+(pc.kit||1):''), f?esc(f.material+' '+f.cor):''].filter(Boolean).join(' · '); return `<label class="check-item ${pc.feito?'done':''}"><input type="checkbox" ${pc.feito?'checked':''} onchange="togglePeca('${p.id}',${i})"><span>${esc(pc.nome)}${extra?` <small>${extra}</small>`:''}</span></label>`; }).join('')+`</div>`; })():'';
+    const checklist=(p.pacoteId&&p.pecas&&p.pecas.length)?(()=>{ const feitas=p.pecas.filter(x=>x.feito).length; return `<div class="checklist"><div class="check-head">Peças prontas: ${feitas}/${p.pecas.length}</div>`+p.pecas.map((pc,i)=>{ const prx=state.projetos.find(x=>x.id===pc.projetoId); const f=state.filamentos.find(x=>x.id===(pc.filamentoId||(prx&&prx.filamentoId))); const extra=[(p.qtd>1?'pacote '+(pc.kit||1):''), f?esc(f.material+' '+f.cor):''].filter(Boolean).join(' · '); return `<label class="check-item ${pc.feito?'done':''}"><input type="checkbox" ${pc.feito?'checked':''} onchange="togglePeca('${p.id}',${i})"><span>${esc(pc.nome)}${extra?` <small>${extra}</small>`:''}</span></label>`; }).join('')+`</div>`; })():'';
     const lucroTxt=p.status==='cancelado'?'':`<span class="${custo.lucro>=0?'profit-positive':'profit-negative'}">${formatMoney(custo.lucro)}</span>`;
     return `<div class="list-item"><div class="top"><div><div class="title">${esc(p.cliente||'Sem cliente')} ${tipoTag}</div><div class="meta">${esc(nomeProj)} × ${p.qtd||1}</div></div><span class="status ${statusClass}">${statusLabel}</span></div><div class="meta">${formatDate(p.data)} → ${formatDate(p.prazo)} · ${formatMoney(p.valor)} ${p.pago?' · ✓ Pago':' · ○ Aberto'} ${lucroTxt?' · Lucro est.: '+lucroTxt:''}</div>${checklist}<div class="actions">${botaoAvancar(p)}<button class="btn btn-ghost btn-sm" onclick="abrirModalPedido('${p.id}')">Editar</button><button class="btn btn-ghost btn-sm" onclick="duplicarPedido('${p.id}')">Duplicar</button>${!['entregue','cancelado'].includes(p.status)?`<button class="btn btn-warning btn-sm" onclick="abrirModalFalha('${p.id}')">Falha</button>`:''}<button class="btn btn-danger btn-sm" onclick="excluirPedido('${p.id}')">Excluir</button></div></div>`;
   }).join('');
@@ -598,22 +586,14 @@ function montarPecas(pac, qtd) {
   }
   return out;
 }
-function lerFilamentosPecas() {
-  document.querySelectorAll('#lista-pecas-modal .peca-fil').forEach((sel, i) => { if (pecasModal[i]) pecasModal[i].filamentoId = sel.value || null; });
-}
 function renderPecasModal() {
   const sel = document.getElementById('m-projeto').value;
-  const bUnico = document.getElementById('bloco-fil-unico'), bPecas = document.getElementById('bloco-pecas');
-  if (!sel.startsWith('k:')) { bUnico.classList.remove('hidden'); bPecas.classList.add('hidden'); return; }
-  bUnico.classList.add('hidden'); bPecas.classList.remove('hidden');
-  lerFilamentosPecas();
+  if (!sel.startsWith('k:')) return;
   const pac = state.pacotes.find(x => x.id === sel.slice(2)); if (!pac) return;
   const qtd = Math.max(1, parseInt(document.getElementById('m-qtd').value) || 1);
   const novas = montarPecas(pac, qtd);
-  novas.forEach((n, i) => { const o = pecasModal[i]; if (o && o.projetoId === n.projetoId) { n.filamentoId = o.filamentoId; n.feito = o.feito; } });
+  novas.forEach((n, i) => { const o = pecasModal[i]; if (o && o.projetoId === n.projetoId) { n.filamentoId = o.filamentoId || null; n.feito = o.feito; } });
   pecasModal = novas;
-  const optsF = f => '<option value="">— Selecione —</option>' + state.filamentos.map(fl => `<option value="${fl.id}" ${f===fl.id?'selected':''}>${esc(fl.material)} ${esc(fl.cor)} (${Math.round(fl.estoque_g)}g)</option>`).join('');
-  document.getElementById('lista-pecas-modal').innerHTML = pecasModal.map(pc => `<div class="form-group"><label>${esc(pc.nome)}${qtd>1?' — pacote '+pc.kit:''}</label><select class="peca-fil">${optsF(pc.filamentoId)}</select></div>`).join('');
 }
 
 function abrirModalPedido(id=null, base=null) {
@@ -621,8 +601,7 @@ function abrirModalPedido(id=null, base=null) {
   pecasModal = (p.pecas || []).map(x => ({ ...x }));
   const optsProj=state.projetos.map(pr=>`<option value="p:${pr.id}" ${p.projetoId===pr.id&&!p.pacoteId?'selected':''}>${esc(pr.nome)}</option>`).join('');
   const optsPac=state.pacotes.map(k=>`<option value="k:${k.id}" ${p.pacoteId===k.id?'selected':''}>${esc(k.nome)}</option>`).join('');
-  const optsFil=state.filamentos.map(f=>`<option value="${f.id}" ${p.filamentoId===f.id?'selected':''}>${esc(f.material)} ${esc(f.cor)} (${Math.round(f.estoque_g)}g)</option>`).join('');
-  document.getElementById('modal-content').innerHTML=`<h2>${id?'Editar':'Novo'} Pedido</h2><div class="form-group"><label>Cliente *</label><input id="m-cliente" value="${esc(p.cliente||'')}" placeholder="Nome do cliente"></div><div class="form-group"><label>Tipo de Cliente</label><select id="m-tipo-cliente"><option value="pf" ${p.tipo_cliente!=='pj'?'selected':''}>Pessoa Física (PF)</option><option value="pj" ${p.tipo_cliente==='pj'?'selected':''}>Pessoa Jurídica (PJ)</option></select></div><div class="form-group"><label>Projeto ou pacote</label><select id="m-projeto"><option value="">— Selecione —</option>${optsPac?`<optgroup label="Pacotes">${optsPac}</optgroup>`:''}<optgroup label="Projetos">${optsProj}</optgroup></select></div><div class="form-group" id="bloco-fil-unico"><label>Filamento a usar (desconto automático)</label><select id="m-filamento-id"><option value="">— Selecione —</option>${optsFil}</select></div><div id="bloco-pecas" class="hidden"><label style="display:block;font-size:0.78rem;color:var(--muted);margin-bottom:8px">Filamento de cada peça (desconto automático)</label><div id="lista-pecas-modal"></div></div><div class="form-row"><div class="form-group"><label>Quantidade</label><input id="m-qtd" type="number" min="1" value="${p.qtd||1}"></div><div class="form-group"><label>Valor total (R$)</label><input id="m-valor" type="number" step="0.01" value="${p.valor||''}"></div></div><div class="form-row"><div class="form-group"><label>Data do pedido</label><input id="m-data" type="date" value="${p.data||hoje()}"></div><div class="form-group"><label>Prazo de entrega</label><input id="m-prazo" type="date" value="${p.prazo||''}"></div></div><div class="form-group"><label>Status</label><select id="m-status"><option value="pendente" ${p.status==='pendente'?'selected':''}>Pendente</option><option value="producao" ${p.status==='producao'?'selected':''}>Em produção</option><option value="concluido" ${p.status==='concluido'?'selected':''}>Concluído</option><option value="entregue" ${p.status==='entregue'?'selected':''}>Entregue</option><option value="cancelado" ${p.status==='cancelado'?'selected':''}>Cancelado</option></select></div><div class="form-row"><div class="form-group"><label>Filamento real usado (g)</label><input id="m-filamento" type="number" value="${p.filamento_g||''}" placeholder="Vazio = média"></div><div class="form-group"><label>Tempo real (h)</label><input id="m-tempo" type="number" step="0.1" value="${p.tempo_h||''}" placeholder="Vazio = média"></div></div><div class="form-group"><label>Frete / Entrega (R$)</label><input id="m-frete" type="number" step="0.01" value="${p.frete||0}"></div><div class="form-group"><label><input type="checkbox" id="m-pago" ${p.pago?'checked':''}> Já foi pago?</label></div><div class="form-group"><label>Observações</label><textarea id="m-obs">${esc(p.obs||'')}</textarea></div><div class="modal-actions"><button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarPedido()">Salvar</button></div>`;
+  document.getElementById('modal-content').innerHTML=`<h2>${id?'Editar':'Novo'} Pedido</h2><div class="form-group"><label>Cliente *</label><input id="m-cliente" value="${esc(p.cliente||'')}" placeholder="Nome do cliente"></div><div class="form-group"><label>Tipo de Cliente</label><select id="m-tipo-cliente"><option value="pf" ${p.tipo_cliente!=='pj'?'selected':''}>Pessoa Física (PF)</option><option value="pj" ${p.tipo_cliente==='pj'?'selected':''}>Pessoa Jurídica (PJ)</option></select></div><div class="form-group"><label>Projeto ou pacote</label><select id="m-projeto"><option value="">— Selecione —</option>${optsPac?`<optgroup label="Pacotes">${optsPac}</optgroup>`:''}<optgroup label="Projetos">${optsProj}</optgroup></select></div><div class="form-row"><div class="form-group"><label>Quantidade</label><input id="m-qtd" type="number" min="1" value="${p.qtd||1}"></div><div class="form-group"><label>Valor total (R$)</label><input id="m-valor" type="number" step="0.01" value="${p.valor||''}"></div></div><div class="form-row"><div class="form-group"><label>Data do pedido</label><input id="m-data" type="date" value="${p.data||hoje()}"></div><div class="form-group"><label>Prazo de entrega</label><input id="m-prazo" type="date" value="${p.prazo||''}"></div></div><div class="form-group"><label>Status</label><select id="m-status"><option value="pendente" ${p.status==='pendente'?'selected':''}>Pendente</option><option value="producao" ${p.status==='producao'?'selected':''}>Em produção</option><option value="concluido" ${p.status==='concluido'?'selected':''}>Concluído</option><option value="entregue" ${p.status==='entregue'?'selected':''}>Entregue</option><option value="cancelado" ${p.status==='cancelado'?'selected':''}>Cancelado</option></select></div><div class="form-row"><div class="form-group"><label>Filamento real usado (g)</label><input id="m-filamento" type="number" value="${p.filamento_g||''}" placeholder="Vazio = média"></div><div class="form-group"><label>Tempo real (h)</label><input id="m-tempo" type="number" step="0.1" value="${p.tempo_h||''}" placeholder="Vazio = média"></div></div><div class="form-group"><label>Frete / Entrega (R$)</label><input id="m-frete" type="number" step="0.01" value="${p.frete||0}"></div><div class="form-group"><label><input type="checkbox" id="m-pago" ${p.pago?'checked':''}> Já foi pago?</label></div><div class="form-group"><label>Observações</label><textarea id="m-obs">${esc(p.obs||'')}</textarea></div><div class="modal-actions"><button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarPedido()">Salvar</button></div>`;
   const selProj=document.getElementById('m-projeto');
   selProj.value = p.pacoteId ? 'k:'+p.pacoteId : (p.projetoId ? 'p:'+p.projetoId : '');
   selProj.addEventListener('change', e=>{
@@ -642,13 +621,15 @@ function salvarPedido() {
   const sel=document.getElementById('m-projeto').value;
   const projetoId=sel.startsWith('p:')?sel.slice(2):null; const pacoteId=sel.startsWith('k:')?sel.slice(2):null;
   const proj=state.projetos.find(x=>x.id===projetoId); const pac=state.pacotes.find(x=>x.id===pacoteId);
-  const novoStatus=document.getElementById('m-status').value; let filamentoId=document.getElementById('m-filamento-id').value||null;
+  const novoStatus=document.getElementById('m-status').value; const anterior=editId?state.pedidos.find(x=>x.id===editId):null;
+  const mesmoProj=!!anterior && (anterior.projetoId||null)===projetoId && (anterior.pacoteId||null)===pacoteId;
+  const filamentoId=mesmoProj?(anterior.filamentoId||null):null;
   let pecas=[];
-  if(pac){ renderPecasModal(); pecas=pecasModal.map(x=>({projetoId:x.projetoId,nome:x.nome,kit:x.kit,filamentoId:x.filamentoId||null,feito:!!x.feito})); filamentoId=null; }
+  if(pac){ renderPecasModal(); pecas=pecasModal.map(x=>({projetoId:x.projetoId,nome:x.nome,kit:x.kit,filamentoId:x.filamentoId||null,feito:!!x.feito})); }
   const dados={ cliente, tipo_cliente:document.getElementById('m-tipo-cliente').value, projetoId, projetoNome:proj?proj.nome:(pac?pac.nome:''), pacoteId, pacoteNome:pac?pac.nome:'', pecas, filamentoId, qtd:Number(document.getElementById('m-qtd').value)||1, valor:Number(document.getElementById('m-valor').value)||0, data:document.getElementById('m-data').value, prazo:document.getElementById('m-prazo').value, status:novoStatus, filamento_g:document.getElementById('m-filamento').value?Number(document.getElementById('m-filamento').value):null, tempo_h:document.getElementById('m-tempo').value?Number(document.getElementById('m-tempo').value):null, frete:Number(document.getElementById('m-frete').value)||0, pago:document.getElementById('m-pago').checked, obs:document.getElementById('m-obs').value.trim(), falhas:editId?(state.pedidos.find(x=>x.id===editId)?.falhas||[]):[] };
   let pedidoAnterior=null;
   if(editId){ const idx=state.pedidos.findIndex(x=>x.id===editId); pedidoAnterior={...state.pedidos[idx]}; state.pedidos[idx]={...state.pedidos[idx],...dados}; }
-  else state.pedidos.push({id:uid(), descontado:false, ...dados});
+  else state.pedidos.push({id:uid(), ...dados});
   const pedidoAtual=editId?state.pedidos.find(x=>x.id===editId):state.pedidos[state.pedidos.length-1];
   const eraPago=pedidoAnterior?pedidoAnterior.pago:false;
   if(dados.pago && !eraPago && dados.valor>0){ state.transacoes.push({ id:uid(), tipo:'entrada', valor:dados.valor, data:hoje(), categoria:'Venda', descricao:`Pedido - ${dados.cliente} (${dados.projetoNome||'avulso'})`, pedidoId:pedidoAtual.id }); }
@@ -656,33 +637,7 @@ function salvarPedido() {
     const vinc=state.transacoes.filter(t=>t.pedidoId===pedidoAtual.id);
     if(vinc.length && confirm(`Você desmarcou "pago". Remover do caixa o lançamento de entrada deste pedido (${vinc.map(t=>formatMoney(t.valor)).join(', ')})?\n\nOK = remover · Cancelar = manter no caixa`)) state.transacoes=state.transacoes.filter(t=>t.pedidoId!==pedidoAtual.id);
   }
-  const statusConclusao=['concluido','entregue'];
-  const mudouParaConcluido=statusConclusao.includes(novoStatus) && (!pedidoAnterior || !statusConclusao.includes(pedidoAnterior.status));
-  if(mudouParaConcluido && !pedidoAtual.descontado) descontarFilamento(pedidoAtual);
   salvar(); fecharModal(); renderPedidos(); verificarNotificacoes();
-}
-
-function descontarFilamento(pedido) {
-  if (pedido.pacoteId && pedido.pecas && pedido.pecas.length) {
-    const gDe = pc => { const pr = state.projetos.find(x => x.id === pc.projetoId); return pr ? (Number(pr.filamento_g) || 0) : 0; };
-    const gAuto = pedido.pecas.reduce((a, pc) => a + gDe(pc), 0);
-    const manual = Number(pedido.filamento_g) || 0;
-    const fator = manual > 0 ? (gAuto > 0 ? manual / gAuto : 0) : 1;
-    let ok = false, sem = false;
-    pedido.pecas.forEach(pc => {
-      const g = gDe(pc) * fator; if (g <= 0) return;
-      const fil = state.filamentos.find(f => f.id === pc.filamentoId);
-      if (!fil) { sem = true; return; }
-      fil.estoque_g = Math.max(0, (Number(fil.estoque_g) || 0) - g); ok = true;
-    });
-    if (ok) pedido.descontado = true;
-    if (sem) setTimeout(() => alert('Algumas peças do pacote estão sem filamento escolhido, então não descontei o estoque delas.'), 50);
-    return;
-  }
-  if(!pedido.filamentoId) return;
-  const fil=state.filamentos.find(f=>f.id===pedido.filamentoId); if(!fil) return;
-  const grams=calcularCustoPedido(pedido).grams; if(grams<=0) return;
-  fil.estoque_g=Math.max(0,(Number(fil.estoque_g)||0)-grams); pedido.descontado=true;
 }
 
 function togglePeca(pedidoId, i) {
@@ -696,7 +651,7 @@ function verificarAvisoPacote(p, feitas) {
   if (feitas === p.pecas.length && ['pendente', 'producao'].includes(p.status)) {
     setTimeout(() => {
       if (confirm('Todas as peças estão prontas. Marcar o pedido como Concluído?')) {
-        p.status = 'concluido'; if (!p.descontado) descontarFilamento(p);
+        p.status = 'concluido';
         salvar(); renderPedidos(); atualizarDashboard();
       }
     }, 50);
@@ -705,8 +660,8 @@ function verificarAvisoPacote(p, feitas) {
 
 function abrirModalFalha(pedidoId) {
   const p=state.pedidos.find(x=>x.id===pedidoId); if(!p) return; editId=pedidoId;
-  const selFalha=p.pacoteId?`<div class="form-group"><label>Filamento da peça que falhou</label><select id="m-falha-fil"><option value="">— Selecione —</option>${state.filamentos.map(f=>`<option value="${f.id}">${esc(f.material)} ${esc(f.cor)} (${Math.round(f.estoque_g)}g)</option>`).join('')}</select></div>`:'';
-  document.getElementById('modal-content').innerHTML=`<h2>Registrar Falha / Reimpressão</h2><p class="text-sm text-muted mb-3">Desconta filamento do estoque e adiciona custo extra no lucro do pedido.</p>${selFalha}<div class="form-group"><label>Filamento desperdiçado (g) *</label><input id="m-falha-g" type="number" placeholder="Ex: 35"></div><div class="form-group"><label>Tempo perdido (h)</label><input id="m-falha-h" type="number" step="0.1" placeholder="Ex: 1.5"></div><div class="form-group"><label>Motivo / Observação</label><input id="m-falha-motivo" placeholder="Ex: Warping..."></div><div class="modal-actions"><button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button><button class="btn btn-warning" onclick="salvarFalha()">Registrar Falha</button></div>`;
+  const selFalha=p.pacoteId?`<div class="form-group"><label>Filamento da peça que falhou</label><select id="m-falha-fil"><option value="">— Selecione —</option>${state.filamentos.map(f=>`<option value="${f.id}">${esc(f.material)} ${esc(f.cor)}</option>`).join('')}</select></div>`:'';
+  document.getElementById('modal-content').innerHTML=`<h2>Registrar Falha / Reimpressão</h2><p class="text-sm text-muted mb-3">Adiciona o custo da falha (material, energia e máquina) no lucro do pedido.</p>${selFalha}<div class="form-group"><label>Filamento desperdiçado (g) *</label><input id="m-falha-g" type="number" placeholder="Ex: 35"></div><div class="form-group"><label>Tempo perdido (h)</label><input id="m-falha-h" type="number" step="0.1" placeholder="Ex: 1.5"></div><div class="form-group"><label>Motivo / Observação</label><input id="m-falha-motivo" placeholder="Ex: Warping..."></div><div class="modal-actions"><button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button><button class="btn btn-warning" onclick="salvarFalha()">Registrar Falha</button></div>`;
   document.getElementById('modal').classList.add('open');
 }
 
@@ -714,10 +669,9 @@ function salvarFalha() {
   const g=Number(document.getElementById('m-falha-g').value); if(!g||g<=0) return alert('Informe os gramas desperdiçados');
   const h=Number(document.getElementById('m-falha-h').value)||0; const motivo=document.getElementById('m-falha-motivo').value.trim();
   const p=state.pedidos.find(x=>x.id===editId); if(!p) return;
-  if(!p.falhas) p.falhas=[]; const filId=(document.getElementById('m-falha-fil')||{}).value||p.filamentoId||null;
+  if(!p.falhas) p.falhas=[]; const projF=state.projetos.find(x=>x.id===p.projetoId); const filId=(document.getElementById('m-falha-fil')||{}).value||p.filamentoId||(projF&&projF.filamentoId)||null;
   p.falhas.push({id:uid(), data:hoje(), filamento_g:g, tempo_h:h, motivo, filamentoId:filId});
-  if(filId){ const fil=state.filamentos.find(f=>f.id===filId); if(fil) fil.estoque_g=Math.max(0,(Number(fil.estoque_g)||0)-g); }
-  salvar(); fecharModal(); renderPedidos(); alert('Falha registrada e filamento descontado.');
+  salvar(); fecharModal(); renderPedidos(); alert('Falha registrada.');
 }
 
 function excluirPedido(id) {
@@ -726,12 +680,6 @@ function excluirPedido(id) {
   const vinc = state.transacoes.filter(t => t.pedidoId === id);
   if (vinc.length && confirm(`Este pedido tem ${vinc.length} lançamento(s) no caixa (${vinc.map(t => formatMoney(t.valor)).join(', ')}). Remover também do caixa?\n\nOK = remover · Cancelar = manter no caixa`)) {
     state.transacoes = state.transacoes.filter(t => t.pedidoId !== id);
-  }
-  if (p.descontado) {
-    const lista = gramasPorFilamento(p);
-    if (lista.length && confirm(`O filamento deste pedido já foi descontado do estoque (${lista.map(x => Math.round(x.g) + ' g de ' + x.fil.material + ' ' + x.fil.cor).join(', ')}). Devolver ao estoque?\n\nOK = devolver · Cancelar = manter descontado`)) {
-      devolverFilamento(lista);
-    }
   }
   state.pedidos = state.pedidos.filter(x => x.id !== id); salvar(); renderPedidos();
 }
@@ -776,25 +724,24 @@ function renderFilamentos() {
   const el=document.getElementById('lista-filamentos');
   const mats=[...new Set(state.filamentos.map(f=>f.material).filter(Boolean))].sort();
   if(!setOpts('f-fil-mat','<option value="todos">Todos materiais</option>'+mats.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join(''),fFil.material)) fFil.material='todos';
-  if(!state.filamentos.length){ el.innerHTML='<div class="empty"><div class="icon">◉</div>Nenhum filamento cadastrado.</div>'; return; }
+  if(!state.filamentos.length){ el.innerHTML='<div class="empty"><div class="icon">◉</div>Nenhum filamento cadastrado.<br>Clique em + Novo</div>'; return; }
   const qf=norm(busca.filamentos);
-  const listaF=state.filamentos.filter(f=>(!qf||norm((f.material||'')+' '+(f.cor||'')).includes(qf)) && (fFil.material==='todos'||f.material===fFil.material) && (fFil.baixo!=='baixo'||(Number(f.estoque_g)||0)<(Number(f.alerta_g)||200)));
+  const listaF=state.filamentos.filter(f=>(!qf||norm((f.material||'')+' '+(f.cor||'')).includes(qf)) && (fFil.material==='todos'||f.material===fFil.material));
   if(!listaF.length){ el.innerHTML='<div class="empty">Nenhum filamento encontrado.</div>'; return; }
-  el.innerHTML=listaF.map(f=>{
-    const baixo=(Number(f.estoque_g)||0)<(Number(f.alerta_g)||200);
-    return `<div class="list-item"><div class="top"><div><div class="title">${esc(f.material||'')} — ${esc(f.cor||'')}</div><div class="meta">Custo: ${formatMoney(f.custo_kg)} / kg · Alerta: ${f.alerta_g||200}g</div></div><div class="value ${baixo?'warning-text':''}" style="font-size:1.1rem">${Number(f.estoque_g)>=1000?(f.estoque_g/1000).toFixed(2)+' kg':Math.round(f.estoque_g)+' g'}</div></div>${baixo?'<div class="meta warning-text">⚠ Estoque baixo</div>':''}<div class="actions"><button class="btn btn-ghost btn-sm" onclick="abrirModalFilamento('${f.id}')">Editar</button><button class="btn btn-danger btn-sm" onclick="excluirFilamento('${f.id}')">Excluir</button></div></div>`;
-  }).join('');
+  el.innerHTML=listaF.map(f=>`<div class="list-item"><div class="top"><div><div class="title">${esc(f.material||'')} — ${esc(f.cor||'')}</div><div class="meta">${Number(f.custo_kg)>0?formatMoney(f.custo_kg)+' / kg':'<span class="warning-text">⚠ Sem preço por kg</span>'}</div></div></div><div class="actions"><button class="btn btn-ghost btn-sm" onclick="abrirModalFilamento('${f.id}')">Editar</button><button class="btn btn-danger btn-sm" onclick="excluirFilamento('${f.id}')">Excluir</button></div></div>`).join('');
 }
 
 function abrirModalFilamento(id=null) {
   editId=id; const f=id?state.filamentos.find(x=>x.id===id):{};
-  document.getElementById('modal-content').innerHTML=`<h2>${id?'Editar':'Novo'} Filamento</h2><div class="form-group"><label>Material *</label><select id="m-material"><option value="PLA" ${f.material==='PLA'?'selected':''}>PLA</option><option value="PETG" ${f.material==='PETG'?'selected':''}>PETG</option><option value="ABS" ${f.material==='ABS'?'selected':''}>ABS</option><option value="TPU" ${f.material==='TPU'?'selected':''}>TPU</option><option value="ASA" ${f.material==='ASA'?'selected':''}>ASA</option><option value="Outro" ${f.material==='Outro'?'selected':''}>Outro</option></select></div><div class="form-group"><label>Cor *</label><input id="m-cor" value="${esc(f.cor||'')}" placeholder="Preto, Branco..."></div><div class="form-row"><div class="form-group"><label>Estoque atual (g)</label><input id="m-estoque" type="number" value="${f.estoque_g||0}"></div><div class="form-group"><label>Custo por kg (R$)</label><input id="m-custo" type="number" step="0.01" value="${f.custo_kg||''}"></div></div><div class="form-group"><label>Alerta de estoque baixo (g)</label><input id="m-alerta" type="number" value="${f.alerta_g||200}"></div><div class="modal-actions"><button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarFilamento()">Salvar</button></div>`;
+  const mats=['PLA','PETG','ABS','TPU','ASA','Outro'];
+  document.getElementById('modal-content').innerHTML=`<h2>${id?'Editar':'Novo'} Filamento</h2><p class="text-sm text-muted mb-3">Usado para calcular o custo do material de cada projeto.</p><div class="form-group"><label>Material *</label><select id="m-material">${mats.map(m=>`<option value="${m}" ${f.material===m?'selected':''}>${m}</option>`).join('')}</select></div><div class="form-group"><label>Cor *</label><input id="m-cor" value="${esc(f.cor||'')}" placeholder="Preto, Branco..."></div><div class="form-group"><label>Preço por kg (R$) *</label><input id="m-custo" type="number" step="0.01" value="${f.custo_kg||''}" placeholder="Ex: 99.90"></div><div class="modal-actions"><button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarFilamento()">Salvar</button></div>`;
   document.getElementById('modal').classList.add('open');
 }
 
 function salvarFilamento() {
   const cor=document.getElementById('m-cor').value.trim(); if(!cor) return alert('Cor é obrigatória');
-  const dados={ material:document.getElementById('m-material').value, cor, estoque_g:Number(document.getElementById('m-estoque').value)||0, custo_kg:Number(document.getElementById('m-custo').value)||0, alerta_g:Number(document.getElementById('m-alerta').value)||200 };
+  const custo=Number(document.getElementById('m-custo').value)||0; if(custo<=0) return alert('Informe o preço por kg');
+  const dados={ material:document.getElementById('m-material').value, cor, custo_kg:custo };
   if(editId){ const idx=state.filamentos.findIndex(x=>x.id===editId); state.filamentos[idx]={...state.filamentos[idx],...dados}; }
   else state.filamentos.push({id:uid(),...dados});
   salvar(); fecharModal(); renderFilamentos();
@@ -876,7 +823,6 @@ function bindFiltros() {
   on('f-cx-cat', 'change', e => { fCx.cat = e.target.value; renderCaixa(); });
   on('f-cx-mes', 'change', e => { fCx.mes = e.target.value; renderCaixa(); });
   on('f-fil-mat', 'change', e => { fFil.material = e.target.value; renderFilamentos(); });
-  on('f-fil-baixo', 'change', e => { fFil.baixo = e.target.value; renderFilamentos(); });
   on('filtro-catalogo', 'click', e => {
     const b = e.target.closest('.chip'); if (!b) return;
     abaCatalogo = b.dataset.aba; busca.projetos = ''; document.getElementById('busca-projetos').value = '';
@@ -894,31 +840,27 @@ function mostrarToast(msg, ms = 8000) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add('hidden'), ms);
 }
 
-// ===== Alerta de estoque baixo =====
-function renderAlertasEstoque() {
-  const el = document.getElementById('alertas-estoque');
-  const baixos = state.filamentos.filter(f => (Number(f.estoque_g) || 0) < (Number(f.alerta_g) || 200)).sort((a, b) => (Number(a.estoque_g) || 0) - (Number(b.estoque_g) || 0));
-  el.innerHTML = baixos.length ? `<div class="alert-box" style="cursor:pointer" onclick="navegar('filamento')">⚠ <strong>Estoque baixo:</strong> ${baixos.map(f => `${esc(f.material)} ${esc(f.cor)} (${Math.round(Number(f.estoque_g) || 0)} g)`).join(' · ')}</div>` : '';
-}
-
 // ===== Preço sugerido =====
 function margemDesejada() {
   const raw = state.config.margem_desejada;
   const m = (raw === undefined || raw === null || raw === '') ? 50 : (Number(raw) || 0);
   return Math.min(Math.max(m, 0), 95);
 }
-function custoEstimadoProjeto(g, h) {
+function filDoProjeto(p) { return state.filamentos.find(f => f.id === p.filamentoId) || null; }
+function nomeFilProj(p) { const f = filDoProjeto(p); return f ? ` (${esc(f.material)} ${esc(f.cor)})` : ''; }
+function avisoFilProj(p) { return (Number(p.filamento_g) > 0 && !filDoProjeto(p)) ? '<div class="meta warning-text">⚠ Escolha o filamento para calcular o custo do material</div>' : ''; }
+function custoEstimadoProjeto(g, h, filId) {
   const cfg = state.config;
-  const kgs = state.filamentos.map(f => Number(f.custo_kg) || 0).filter(x => x > 0);
-  const ck = kgs.length ? kgs.reduce((a, b) => a + b, 0) / kgs.length : 0;
+  const fil = state.filamentos.find(f => f.id === filId);
+  const ck = fil ? (Number(fil.custo_kg) || 0) : 0;
   const base = (g / 1000) * ck + h * ((Number(cfg.custo_energia_hora) || 0) + (Number(cfg.custo_hora_maquina) || 0));
-  return { custo: base * (1 + (Number(cfg.taxa_falha) || 0) / 100), semFil: !kgs.length };
+  return { custo: base * (1 + (Number(cfg.taxa_falha) || 0) / 100), semFil: !(ck > 0), fil };
 }
 function precoSugerido(custo) { return Math.ceil((custo / (1 - margemDesejada() / 100)) * 10) / 10; }
 function infoCustoProjeto(p) {
   const g = Number(p.filamento_g) || 0, h = Number(p.tempo_h) || 0, preco = Number(p.preco) || 0;
   if ((!g && !h) || preco <= 0) return '';
-  const { custo } = custoEstimadoProjeto(g, h);
+  const { custo } = custoEstimadoProjeto(g, h, p.filamentoId);
   return ` · custo ~${formatMoney(custo)} · margem ${((preco - custo) / preco * 100).toFixed(0)}%`;
 }
 function iniciarSugestao() {
@@ -926,10 +868,11 @@ function iniciarSugestao() {
   const calc = () => {
     const g = Number(document.getElementById('m-filamento').value) || 0, h = Number(document.getElementById('m-tempo').value) || 0;
     if (!g && !h) { box.innerHTML = 'Preencha filamento e tempo para ver o preço sugerido.'; return; }
-    const { custo, semFil } = custoEstimadoProjeto(g, h); const sug = precoSugerido(custo);
-    box.innerHTML = `Custo estimado: <strong>${formatMoney(custo)}</strong> · Margem desejada: ${margemDesejada()}%<br>Preço sugerido: <strong>${formatMoney(sug)}</strong> <button class="btn btn-ghost btn-sm" style="margin-left:6px" onclick="usarPrecoSugerido(${sug})">Usar</button>${semFil ? '<br><small>Cadastre um filamento com custo por kg para incluir o material no cálculo.</small>' : '<br><small>Material: custo médio dos seus filamentos.</small>'}`;
+    const { custo, semFil, fil } = custoEstimadoProjeto(g, h, document.getElementById('m-fil-proj').value); const sug = precoSugerido(custo);
+    box.innerHTML = `Custo estimado: <strong>${formatMoney(custo)}</strong> · Margem desejada: ${margemDesejada()}%<br>Preço sugerido: <strong>${formatMoney(sug)}</strong> <button class="btn btn-ghost btn-sm" style="margin-left:6px" onclick="usarPrecoSugerido(${sug})">Usar</button>${semFil ? '<br><small>Escolha um filamento (com preço por kg) para incluir o custo do material.</small>' : `<br><small>Material: ${esc(fil.material)} ${esc(fil.cor)} a ${formatMoney(fil.custo_kg)}/kg.</small>`}`;
   };
   ['m-filamento', 'm-tempo'].forEach(id => document.getElementById(id).addEventListener('input', calc));
+  document.getElementById('m-fil-proj').addEventListener('change', calc);
   calc();
 }
 function usarPrecoSugerido(v) { document.getElementById('m-preco').value = Number(v).toFixed(2); }
@@ -947,7 +890,7 @@ function avancarStatus(id) {
       if (!confirm('Há peças do pacote ainda não marcadas como prontas. Concluir o pedido mesmo assim?')) return;
       p.pecas.forEach(x => { x.feito = true; });
     }
-    p.status = 'concluido'; if (!p.descontado) descontarFilamento(p);
+    p.status = 'concluido';
   } else if (prox === 'entregue') {
     p.status = 'entregue';
     if (!p.pago && (Number(p.valor) || 0) > 0 && confirm('Este pedido já foi pago? OK = registrar a entrada no caixa.')) {
@@ -958,24 +901,11 @@ function avancarStatus(id) {
   salvar(); renderPedidos(); atualizarDashboard();
 }
 
-// ===== Devolver filamento =====
-function gramasPorFilamento(p) {
-  const acc = {}; const add = (id, g) => { if (id && g > 0) acc[id] = (acc[id] || 0) + g; };
-  if (p.pacoteId && p.pecas && p.pecas.length) {
-    const gDe = pc => { const pr = state.projetos.find(x => x.id === pc.projetoId); return pr ? (Number(pr.filamento_g) || 0) : 0; };
-    const gAuto = p.pecas.reduce((a, pc) => a + gDe(pc), 0); const manual = Number(p.filamento_g) || 0;
-    const fator = manual > 0 ? (gAuto > 0 ? manual / gAuto : 0) : 1;
-    p.pecas.forEach(pc => add(pc.filamentoId, gDe(pc) * fator));
-  } else add(p.filamentoId, calcularCustoPedido(p).grams);
-  return Object.entries(acc).filter(([id]) => state.filamentos.some(f => f.id === id)).map(([id, g]) => ({ id, g, fil: state.filamentos.find(f => f.id === id) }));
-}
-function devolverFilamento(lista) { lista.forEach(x => { x.fil.estoque_g = (Number(x.fil.estoque_g) || 0) + x.g; }); }
-
 // ===== Duplicar =====
 function duplicarPedido(id) {
   const p = state.pedidos.find(x => x.id === id); if (!p) return;
   const base = JSON.parse(JSON.stringify(p));
-  delete base.id; base.status = 'pendente'; base.pago = false; base.descontado = false; base.falhas = [];
+  delete base.id; base.status = 'pendente'; base.pago = false; base.falhas = [];
   base.data = ''; base.prazo = ''; base.filamento_g = null; base.tempo_h = null;
   base.pecas = (base.pecas || []).map(x => ({ ...x, feito: false }));
   abrirModalPedido(null, base);
