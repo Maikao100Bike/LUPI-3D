@@ -491,7 +491,7 @@ function renderPacotes() {
   el.innerHTML = lista.map(k => {
     const itens = (k.itens || []).map(i => `${i.qtd||1}× ${esc(nomeProj(i.projetoId))}`).join(' · ');
     const total = (k.itens || []).reduce((s, i) => s + (Number(i.qtd) || 1), 0);
-    return `<div class="list-item"><div class="top"><div><div class="title">${esc(k.nome)} <span class="tag-pk">PACOTE</span></div><div class="meta">${total} peça${total!==1?'s':''} · ${formatMoney(k.preco)}</div></div></div><div class="meta">${itens}</div>${k.descricao?`<div class="meta">${esc(k.descricao)}</div>`:''}<div class="actions"><button class="btn btn-ghost btn-sm" onclick="abrirModalPacote('${k.id}')">Editar</button><button class="btn btn-ghost btn-sm" onclick="duplicarPacote('${k.id}')">Duplicar</button><button class="btn btn-danger btn-sm" onclick="excluirPacote('${k.id}')">Excluir</button></div></div>`;
+    return `<div class="list-item"><div class="top"><div><div class="title">${esc(k.nome)} <span class="tag-pk">PACOTE</span></div><div class="meta">${total} peça${total!==1?'s':''} · ${formatMoney(k.preco)}${infoCustoPacote(k)}</div></div></div><div class="meta">${itens}</div>${k.descricao?`<div class="meta">${esc(k.descricao)}</div>`:''}<div class="actions"><button class="btn btn-ghost btn-sm" onclick="abrirModalPacote('${k.id}')">Editar</button><button class="btn btn-ghost btn-sm" onclick="duplicarPacote('${k.id}')">Duplicar</button><button class="btn btn-danger btn-sm" onclick="excluirPacote('${k.id}')">Excluir</button></div></div>`;
   }).join('');
 }
 
@@ -499,14 +499,17 @@ function abrirModalPacote(id = null) {
   if (!state.projetos.length) return alert('Cadastre pelo menos um projeto antes de criar um pacote.');
   editId = id; const k = id ? state.pacotes.find(x => x.id === id) : {};
   itensTemp = (k.itens && k.itens.length) ? k.itens.map(i => ({ ...i })) : [{ projetoId: '', qtd: 1 }];
-  document.getElementById('modal-content').innerHTML = `<h2>${id?'Editar':'Novo'} Pacote</h2><div class="form-group"><label>Nome do pacote *</label><input id="m-pk-nome" value="${esc(k.nome||'')}" placeholder="Ex: Amigos de Natal"></div><div class="form-group"><label>Descrição</label><textarea id="m-pk-desc">${esc(k.descricao||'')}</textarea></div><div class="form-group"><label>Preço do pacote (R$)</label><input id="m-pk-preco" type="number" step="0.01" value="${k.preco||''}" placeholder="129.90"></div><div class="form-group"><label>Projetos que fazem parte do pacote</label><div id="pk-itens"></div><button class="btn btn-ghost btn-sm mt-2" onclick="pacoteAddItem()">+ Adicionar projeto</button></div><div class="modal-actions"><button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarPacote()">Salvar</button></div>`;
+  document.getElementById('modal-content').innerHTML = `<h2>${id?'Editar':'Novo'} Pacote</h2><div class="form-group"><label>Nome do pacote *</label><input id="m-pk-nome" value="${esc(k.nome||'')}" placeholder="Ex: Amigos de Natal"></div><div class="form-group"><label>Descrição</label><textarea id="m-pk-desc">${esc(k.descricao||'')}</textarea></div><div class="form-group"><label>Preço do pacote (R$)</label><input id="m-pk-preco" type="number" step="0.01" value="${k.preco||''}" placeholder="129.90"></div><div id="sugestao-pacote" class="alert-box"></div><div class="form-group"><label>Projetos que fazem parte do pacote</label><div id="pk-itens"></div><button class="btn btn-ghost btn-sm mt-2" onclick="pacoteAddItem()">+ Adicionar projeto</button></div><div class="modal-actions"><button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarPacote()">Salvar</button></div>`;
   renderItensPacote();
+  const boxItens = document.getElementById('pk-itens');
+  ['change', 'input'].forEach(ev => boxItens.addEventListener(ev, () => { lerItensPacote(); atualizarSugestaoPacote(); }));
   document.getElementById('modal').classList.add('open');
 }
 
 function renderItensPacote() {
   const opts = sel => '<option value="">— Selecione —</option>' + state.projetos.map(pr => `<option value="${pr.id}" ${sel===pr.id?'selected':''}>${esc(pr.nome)}</option>`).join('');
   document.getElementById('pk-itens').innerHTML = itensTemp.map((it, i) => `<div style="display:grid;grid-template-columns:1fr 70px 44px;gap:8px;margin-bottom:8px;align-items:center"><select class="pk-proj">${opts(it.projetoId)}</select><input class="pk-qtd" type="number" min="1" value="${it.qtd||1}"><button class="btn btn-danger btn-sm" onclick="pacoteRemItem(${i})">✕</button></div>`).join('');
+  atualizarSugestaoPacote();
 }
 function lerItensPacote() {
   const ps = document.querySelectorAll('#pk-itens .pk-proj'), qs = document.querySelectorAll('#pk-itens .pk-qtd');
@@ -940,6 +943,38 @@ function iniciarSugestao() {
   calc();
 }
 function usarPrecoSugerido(v) { document.getElementById('m-preco').value = Number(v).toFixed(2); }
+
+// ===== Preço sugerido do pacote (soma dos sugeridos dos projetos × quantidade) =====
+function calcPacote(itens) {
+  let custo = 0, sugerido = 0; const linhas = [], semFil = [], semDados = [];
+  (itens || []).forEach(it => {
+    const pr = state.projetos.find(x => x.id === it.projetoId); if (!pr) return;
+    const q = Math.max(1, Number(it.qtd) || 1);
+    const g = Number(pr.filamento_g) || 0, h = Number(pr.tempo_h) || 0;
+    if (!g && !h) { semDados.push(esc(pr.nome)); return; }
+    const r = custoEstimadoProjeto(g, h, pr.filamentoId); const sug = precoSugerido(r.custo);
+    custo += r.custo * q; sugerido += sug * q;
+    linhas.push(`${q}× ${esc(pr.nome)} (${formatMoney(sug)})`);
+    if (r.semFil) semFil.push(esc(pr.nome));
+  });
+  return { custo, sugerido: Math.round(sugerido * 100) / 100, linhas, semFil, semDados };
+}
+function atualizarSugestaoPacote() {
+  const box = document.getElementById('sugestao-pacote'); if (!box) return;
+  const itens = itensTemp.filter(i => i.projetoId);
+  if (!itens.length) { box.innerHTML = 'Escolha os projetos para ver o preço sugerido.'; return; }
+  const r = calcPacote(itens);
+  if (!r.linhas.length) { box.innerHTML = 'Os projetos escolhidos ainda não têm gramas ou tempo cadastrados.'; return; }
+  box.innerHTML = `Soma dos preços sugeridos: <strong>${formatMoney(r.sugerido)}</strong> <button class="btn btn-ghost btn-sm" style="margin-left:6px" onclick="usarPrecoSugeridoPacote(${r.sugerido})">Usar</button><br><small>${r.linhas.join(' · ')}</small><br><small>Custo estimado: ${formatMoney(r.custo)} · Margem desejada: ${margemDesejada()}%</small>`
+    + (r.semFil.length ? `<br><small>⚠ Sem filamento escolhido (custo do material não incluído): ${r.semFil.join(', ')}.</small>` : '')
+    + (r.semDados.length ? `<br><small>⚠ Sem gramas e tempo, ficaram fora da soma: ${r.semDados.join(', ')}.</small>` : '');
+}
+function usarPrecoSugeridoPacote(v) { document.getElementById('m-pk-preco').value = Number(v).toFixed(2); }
+function infoCustoPacote(k) {
+  const r = calcPacote(k.itens); if (!r.linhas.length) return '';
+  const preco = Number(k.preco) || 0;
+  return ` · sugerido ${formatMoney(r.sugerido)}` + (preco > 0 ? ` · margem ${((preco - r.custo) / preco * 100).toFixed(0)}%` : '');
+}
 
 // ===== Avançar status =====
 function botaoAvancar(p) {
