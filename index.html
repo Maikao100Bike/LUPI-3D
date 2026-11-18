@@ -121,8 +121,9 @@
       <div class="card"><h3>Saldo Atual</h3><div class="value" id="dash-saldo">R$ 0,00</div></div>
       <div class="card"><h3>Lucro do Mês</h3><div class="value" id="dash-lucro">R$ 0,00</div></div>
       <div class="card"><h3>Receita Mês</h3><div class="value positive" id="dash-receita">R$ 0,00</div></div>
-      <div class="card"><h3>Despesas Mês</h3><div class="value negative" id="dash-despesa">R$ 0,00</div></div>
+      <div class="card"><h3>Despesas Mês</h3><div class="value negative" id="dash-despesa">R$ 0,00</div><div class="sub" id="dash-despesa-sub"></div></div>
     </div>
+    <div class="card mb-3"><h3>Despesas por categoria</h3><select id="dash-desp-mes" style="margin-bottom:14px"></select><div id="dash-desp-cat"></div></div>
     <div class="card mb-3"><h3>Pedidos Ativos</h3><div class="value" id="dash-ativos">0</div><div class="sub" id="dash-atrasados">0 atrasados</div></div>
     <div class="card mb-3"><h3>Status dos Pedidos</h3><div class="chart-container"><canvas id="chart-status"></canvas></div></div>
     <div class="card mb-3"><h3>Receita × Despesa (6 meses)</h3><div class="chart-container"><canvas id="chart-fluxo"></canvas></div></div>
@@ -204,7 +205,7 @@
     <div class="card mb-3">
       <h3>Custeio (Cálculo de Lucro Real)</h3>
       <p class="text-sm text-muted mb-3">Valores usados para calcular o custo real de cada pedido.</p>
-      <div class="form-group"><label>Custo de energia por hora de impressão (R$)</label><input type="number" id="cfg-energia" step="0.01" placeholder="Ex: 0.85"></div>
+      <div class="form-group"><label>Custo de energia por hora de impressão (R$)</label><input type="number" id="cfg-energia" step="0.01" placeholder="Ex: 0.10"><div class="text-sm text-muted mt-2">Também usado para lançar a energia estimada nas despesas, automaticamente, quando um pedido é concluído (impressora ~100 W ≈ R$ 0,10 por hora).</div></div>
       <div class="form-group"><label>Custo hora máquina / depreciação (R$)</label><input type="number" id="cfg-maquina" step="0.01" placeholder="Ex: 2.50"></div>
       <div class="form-group"><label>Taxa de falha padrão (%)</label><input type="number" id="cfg-falha" step="0.1" placeholder="Ex: 8"></div>
       <div class="form-group"><label>Margem de lucro desejada (%) — usada no preço sugerido</label><input type="number" id="cfg-margem" step="1" placeholder="Ex: 50"></div>
@@ -408,6 +409,8 @@ function atualizarDashboard() {
   document.getElementById('dash-lucro').className = 'value ' + (lucro>=0?'positive':'negative');
   document.getElementById('dash-receita').textContent = formatMoney(receitaMes);
   document.getElementById('dash-despesa').textContent = formatMoney(despesaMes);
+  const energiaMes = state.transacoes.filter(t => t.auto && (t.data || '').slice(0, 7) === localYM(0)).reduce((a, t) => a + (Number(t.valor) || 0), 0);
+  document.getElementById('dash-despesa-sub').textContent = energiaMes > 0 ? `inclui ${formatMoney(energiaMes)} de energia estimada` : '';
   document.getElementById('dash-ativos').textContent = ativos;
   document.getElementById('dash-atrasados').textContent = atrasados + ' atrasado' + (atrasados!==1?'s':'');
   document.getElementById('dash-atrasados').className = 'sub ' + (atrasados>0?'warning-text':'');
@@ -415,7 +418,7 @@ function atualizarDashboard() {
   document.getElementById('header-badge').className = 'badge' + (atrasados>0?' alert':'');
   const badge = document.getElementById('nav-badge-atrasados');
   if (atrasados>0) { badge.textContent=atrasados; badge.classList.remove('hidden'); } else badge.classList.add('hidden');
-  renderAlertasPrazo(); renderChartStatus(); renderChartFluxo(); renderChartProjetos();
+  renderAlertasPrazo(); renderDespesasCategoria(); renderChartStatus(); renderChartFluxo(); renderChartProjetos();
 }
 
 function renderAlertasPrazo() {
@@ -699,11 +702,12 @@ function renderCaixa() {
   if(filtroCaixa!=='todos') lista=lista.filter(t=>t.tipo===filtroCaixa);
   const el=document.getElementById('lista-transacoes');
   if(!lista.length){ el.innerHTML='<div class="empty"><div class="icon">◈</div>Nenhum lançamento ainda.</div>'; return; }
-  el.innerHTML=lista.map(t=>`<div class="list-item"><div class="top"><div><div class="title">${esc(t.descricao||t.categoria||'Lançamento')}</div><div class="meta">${formatDate(t.data)} · ${t.categoria||''}</div></div><div class="value ${t.tipo==='entrada'?'positive':'negative'}" style="font-size:1.05rem">${t.tipo==='entrada'?'+':'−'} ${formatMoney(t.valor)}</div></div><div class="actions"><button class="btn btn-ghost btn-sm" onclick="abrirModalTransacao('${t.id}')">Editar</button><button class="btn btn-danger btn-sm" onclick="excluirTransacao('${t.id}')">Excluir</button></div></div>`).join('');
+  el.innerHTML=lista.map(t=>`<div class="list-item"><div class="top"><div><div class="title">${esc(t.descricao||t.categoria||'Lançamento')}${t.auto?' <span class="tag-pk">AUTO</span>':''}</div><div class="meta">${formatDate(t.data)} · ${t.categoria||''}</div></div><div class="value ${t.tipo==='entrada'?'positive':'negative'}" style="font-size:1.05rem">${t.tipo==='entrada'?'+':'−'} ${formatMoney(t.valor)}</div></div>${t.auto?'<div class="meta">Automático: muda sozinho conforme os pedidos concluídos e o custo de energia da aba Config.</div>':`<div class="actions"><button class="btn btn-ghost btn-sm" onclick="abrirModalTransacao('${t.id}')">Editar</button><button class="btn btn-danger btn-sm" onclick="excluirTransacao('${t.id}')">Excluir</button></div>`}</div>`).join('');
 }
 
 function abrirModalTransacao(id=null) {
   editId=id; const t=id?state.transacoes.find(x=>x.id===id):{};
+  if(t.auto) return alert('Este lançamento é automático (energia estimada) e se ajusta sozinho. Para mudar o valor, altere o custo de energia por hora na aba Config.');
   document.getElementById('modal-content').innerHTML=`<h2>${id?'Editar':'Novo'} Lançamento</h2><div class="form-group"><label>Tipo</label><select id="m-tipo"><option value="entrada" ${t.tipo==='entrada'?'selected':''}>Entrada (receita)</option><option value="saida" ${t.tipo==='saida'?'selected':''}>Saída (despesa)</option></select></div><div class="form-group"><label>Valor (R$) *</label><input id="m-valor" type="number" step="0.01" value="${t.valor||''}"></div><div class="form-group"><label>Data</label><input id="m-data" type="date" value="${t.data||hoje()}"></div><div class="form-group"><label>Categoria</label><select id="m-cat"><option value="Venda" ${t.categoria==='Venda'?'selected':''}>Venda</option><option value="Filamento" ${t.categoria==='Filamento'?'selected':''}>Filamento</option><option value="Equipamento" ${t.categoria==='Equipamento'?'selected':''}>Equipamento</option><option value="Manutenção" ${t.categoria==='Manutenção'?'selected':''}>Manutenção</option><option value="Energia" ${t.categoria==='Energia'?'selected':''}>Energia</option><option value="Marketing" ${t.categoria==='Marketing'?'selected':''}>Marketing</option><option value="Frete" ${t.categoria==='Frete'?'selected':''}>Frete</option><option value="Outros" ${t.categoria==='Outros'?'selected':''}>Outros</option></select></div><div class="form-group"><label>Descrição</label><input id="m-desc" value="${esc(t.descricao||'')}" placeholder="Ex: Compra de 2kg PLA"></div><div class="modal-actions"><button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarTransacao()">Salvar</button></div>`;
   document.getElementById('modal').classList.add('open');
 }
@@ -716,7 +720,7 @@ function salvarTransacao() {
   salvar(); fecharModal(); renderCaixa();
 }
 
-function excluirTransacao(id){ if(!confirm('Excluir este lançamento?')) return; state.transacoes=state.transacoes.filter(x=>x.id!==id); salvar(); renderCaixa(); }
+function excluirTransacao(id){ const tx=state.transacoes.find(x=>x.id===id); if(tx&&tx.auto) return alert('Este lançamento é automático (energia estimada) e se ajusta sozinho. Para mudar o valor, altere o custo de energia por hora na aba Config.'); if(!confirm('Excluir este lançamento?')) return; state.transacoes=state.transacoes.filter(x=>x.id!==id); salvar(); renderCaixa(); }
 
 document.getElementById('filtro-caixa').addEventListener('click', e=>{ if(e.target.classList.contains('chip')){ document.querySelectorAll('#filtro-caixa .chip').forEach(c=>c.classList.remove('active')); e.target.classList.add('active'); filtroCaixa=e.target.dataset.tipo; renderCaixa(); } });
 
@@ -823,6 +827,7 @@ function bindFiltros() {
   on('f-cx-cat', 'change', e => { fCx.cat = e.target.value; renderCaixa(); });
   on('f-cx-mes', 'change', e => { fCx.mes = e.target.value; renderCaixa(); });
   on('f-fil-mat', 'change', e => { fFil.material = e.target.value; renderFilamentos(); });
+  on('dash-desp-mes', 'change', e => { fDespMes = e.target.value; renderDespesasCategoria(); });
   on('filtro-catalogo', 'click', e => {
     const b = e.target.closest('.chip'); if (!b) return;
     abaCatalogo = b.dataset.aba; busca.projetos = ''; document.getElementById('busca-projetos').value = '';
@@ -834,7 +839,66 @@ bindFiltros();
 // ===== Aviso de edição simultânea (não altera o salvamento) =====
 let ultimoSalvar = 0, toastTimer = null;
 const _salvarOriginal = salvar;
-salvar = function () { ultimoSalvar = Date.now(); return _salvarOriginal.apply(this, arguments); };
+salvar = function () {
+  ultimoSalvar = Date.now();
+  try { sincronizarEnergia(); } catch (e) { console.error('Energia automática: erro ignorado, o salvamento segue normal', e); }
+  return _salvarOriginal.apply(this, arguments);
+};
+
+// ===== Energia estimada lançada automaticamente nas despesas =====
+const ENERGIA_PREFIXO = 'energia-auto-';
+function energiaPedido(p) {
+  const kwh = Number(state.config.custo_energia_hora) || 0;
+  const horas = calcularCustoPedido(p).horas;
+  const horasFalhas = (p.falhas || []).reduce((a, f) => a + (Number(f.tempo_h) || 0), 0);
+  return (horas + horasFalhas) * kwh;
+}
+function sincronizarEnergia() {
+  const concl = ['concluido', 'entregue'];
+  const porMes = {};
+  state.pedidos.forEach(p => {
+    if (!concl.includes(p.status)) { delete p.data_conclusao; return; }
+    if (!p.data_conclusao) p.data_conclusao = hoje();
+    const e = energiaPedido(p); if (!(e > 0)) return;
+    const mes = p.data_conclusao.slice(0, 7);
+    const m = porMes[mes] || (porMes[mes] = { valor: 0, data: p.data_conclusao });
+    m.valor += e; if (p.data_conclusao > m.data) m.data = p.data_conclusao;
+  });
+  const ehAuto = t => t.auto && String(t.id).startsWith(ENERGIA_PREFIXO);
+  const existentes = {}; state.transacoes.forEach(t => { if (ehAuto(t)) existentes[t.id] = t; });
+  const manter = new Set();
+  Object.entries(porMes).forEach(([mes, m]) => {
+    const valor = Math.round(m.valor * 100) / 100; if (valor <= 0) return;
+    const id = ENERGIA_PREFIXO + mes; manter.add(id);
+    const dados = { tipo: 'saida', valor, data: m.data, categoria: 'Energia', descricao: `Energia estimada ${mesLabel(mes)} (automático)`, auto: true };
+    if (existentes[id]) Object.assign(existentes[id], dados); else state.transacoes.push({ id, ...dados });
+  });
+  state.transacoes = state.transacoes.filter(t => !ehAuto(t) || manter.has(t.id));
+}
+
+// ===== Despesas por categoria (painel) =====
+let fDespMes = null;
+function renderDespesasCategoria() {
+  const el = document.getElementById('dash-desp-cat');
+  const atual = localYM(0);
+  const meses = [...new Set(state.transacoes.filter(t => t.tipo === 'saida').map(t => (t.data || '').slice(0, 7)).filter(Boolean))];
+  if (!meses.includes(atual)) meses.push(atual);
+  meses.sort().reverse();
+  if (!fDespMes || !meses.includes(fDespMes)) fDespMes = atual;
+  setOpts('dash-desp-mes', meses.map(m => `<option value="${m}">${m === atual ? 'Este mês — ' : ''}${mesLabel(m)}</option>`).join(''), fDespMes);
+  const cat = {}; let total = 0;
+  state.transacoes.forEach(t => {
+    if (t.tipo !== 'saida' || (t.data || '').slice(0, 7) !== fDespMes) return;
+    const v = Number(t.valor) || 0, c = t.categoria || 'Sem categoria';
+    cat[c] = cat[c] || { valor: 0, auto: 0 }; cat[c].valor += v; if (t.auto) cat[c].auto += v; total += v;
+  });
+  const rows = Object.entries(cat).sort((a, b) => b[1].valor - a[1].valor);
+  if (!rows.length) { el.innerHTML = '<div class="text-sm text-muted">Nenhuma despesa neste mês.</div>'; return; }
+  el.innerHTML = rows.map(([c, x]) => {
+    const pct = total > 0 ? x.valor / total * 100 : 0;
+    return `<div style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;gap:8px;font-size:0.9rem"><span>${esc(c)}${x.auto > 0 ? ` <small class="text-muted">· inclui ${formatMoney(x.auto)} estimado</small>` : ''}</span><span style="white-space:nowrap"><strong>${formatMoney(x.valor)}</strong> <small class="text-muted">${pct.toFixed(0)}%</small></span></div><div style="height:7px;background:var(--card2);border-radius:4px;margin-top:4px;overflow:hidden"><div style="height:100%;width:${pct}%;background:var(--primary);border-radius:4px"></div></div></div>`;
+  }).join('') + `<div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);padding-top:10px;font-size:0.9rem"><span>Total de despesas</span><strong>${formatMoney(total)}</strong></div>`;
+}
 function mostrarToast(msg, ms = 8000) {
   const t = document.getElementById('toast'); t.textContent = msg; t.classList.remove('hidden');
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add('hidden'), ms);
