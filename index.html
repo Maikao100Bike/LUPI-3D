@@ -481,6 +481,37 @@ function renderProjetos() {
   el.innerHTML = lista.map(p => `<div class="list-item"><div class="top"><div><div class="title">${esc(p.nome)}</div><div class="meta">${p.filamento_g||0} g${nomeFilProj(p)} · ${p.tempo_h||0} h · ${formatMoney(p.preco)}${infoCustoProjeto(p)}</div></div></div>${avisoFilProj(p)}${p.descricao?`<div class="meta">${esc(p.descricao)}</div>`:''}<div class="actions"><button class="btn btn-ghost btn-sm" onclick="abrirModalProjeto('${p.id}')">Editar</button><button class="btn btn-ghost btn-sm" onclick="duplicarProjeto('${p.id}')">Duplicar</button><button class="btn btn-danger btn-sm" onclick="excluirProjeto('${p.id}')">Excluir</button></div></div>`).join('');
 }
 
+function resumoFilamentoPacote(itens) {
+  // Agrupa gramas por material + cor a partir dos projetos do pacote
+  const map = {};
+  (itens || []).forEach(it => {
+    const pr = state.projetos.find(x => x.id === it.projetoId);
+    if (!pr) return;
+    const q = Math.max(1, Number(it.qtd) || 1);
+    const g = (Number(pr.filamento_g) || 0) * q;
+    if (g <= 0) return;
+    const fil = state.filamentos.find(f => f.id === pr.filamentoId);
+    const chave = fil ? `${fil.material || ''}||${fil.cor || ''}` : '||sem-filamento';
+    const label = fil ? `${fil.material || ''} ${fil.cor || ''}`.trim() : 'Sem filamento definido';
+    if (!map[chave]) map[chave] = { label, grams: 0, semFil: !fil };
+    map[chave].grams += g;
+  });
+  return Object.values(map).sort((a, b) => b.grams - a.grams);
+}
+
+function htmlResumoFilamento(itens) {
+  const rows = resumoFilamentoPacote(itens);
+  if (!rows.length) return '';
+  const totalG = rows.reduce((s, r) => s + r.grams, 0);
+  const linhas = rows.map(r => {
+    const gTxt = r.grams >= 1000 ? (r.grams / 1000).toFixed(2) + ' kg' : Math.round(r.grams) + ' g';
+    const cls = r.semFil ? ' warning-text' : '';
+    return `<span class="${cls}">${esc(r.label)}: <strong>${gTxt}</strong></span>`;
+  }).join(' · ');
+  const totalTxt = totalG >= 1000 ? (totalG / 1000).toFixed(2) + ' kg' : Math.round(totalG) + ' g';
+  return `<div class="meta" style="margin-top:4px">Filamento: ${linhas} <span class="text-muted">(total ${totalTxt})</span></div>`;
+}
+
 function renderPacotes() {
   const el = document.getElementById('lista-projetos');
   if (!state.pacotes.length) { el.innerHTML = '<div class="empty"><div class="icon">▣</div>Nenhum pacote cadastrado.<br>Clique em + Novo</div>'; return; }
@@ -491,7 +522,7 @@ function renderPacotes() {
   el.innerHTML = lista.map(k => {
     const itens = (k.itens || []).map(i => `${i.qtd||1}× ${esc(nomeProj(i.projetoId))}`).join(' · ');
     const total = (k.itens || []).reduce((s, i) => s + (Number(i.qtd) || 1), 0);
-    return `<div class="list-item"><div class="top"><div><div class="title">${esc(k.nome)} <span class="tag-pk">PACOTE</span></div><div class="meta">${total} peça${total!==1?'s':''} · ${formatMoney(k.preco)}${infoCustoPacote(k)}</div></div></div><div class="meta">${itens}</div>${k.descricao?`<div class="meta">${esc(k.descricao)}</div>`:''}<div class="actions"><button class="btn btn-ghost btn-sm" onclick="abrirModalPacote('${k.id}')">Editar</button><button class="btn btn-ghost btn-sm" onclick="duplicarPacote('${k.id}')">Duplicar</button><button class="btn btn-danger btn-sm" onclick="excluirPacote('${k.id}')">Excluir</button></div></div>`;
+    return `<div class="list-item"><div class="top"><div><div class="title">${esc(k.nome)} <span class="tag-pk">PACOTE</span></div><div class="meta">${total} peça${total!==1?'s':''} · ${formatMoney(k.preco)}${infoCustoPacote(k)}</div></div></div><div class="meta">${itens}</div>${htmlResumoFilamento(k.itens)}${k.descricao?`<div class="meta">${esc(k.descricao)}</div>`:''}<div class="actions"><button class="btn btn-ghost btn-sm" onclick="abrirModalPacote('${k.id}')">Editar</button><button class="btn btn-ghost btn-sm" onclick="duplicarPacote('${k.id}')">Duplicar</button><button class="btn btn-danger btn-sm" onclick="excluirPacote('${k.id}')">Excluir</button></div></div>`;
   }).join('');
 }
 
@@ -962,10 +993,21 @@ function calcPacote(itens) {
 function atualizarSugestaoPacote() {
   const box = document.getElementById('sugestao-pacote'); if (!box) return;
   const itens = itensTemp.filter(i => i.projetoId);
-  if (!itens.length) { box.innerHTML = 'Escolha os projetos para ver o preço sugerido.'; return; }
+  if (!itens.length) { box.innerHTML = 'Escolha os projetos para ver o preço sugerido e o consumo de filamento.'; return; }
   const r = calcPacote(itens);
-  if (!r.linhas.length) { box.innerHTML = 'Os projetos escolhidos ainda não têm gramas ou tempo cadastrados.'; return; }
+  const filRows = resumoFilamentoPacote(itens);
+  const filHtml = filRows.length
+    ? '<br><small>Filamento: ' + filRows.map(f => {
+        const gTxt = f.grams >= 1000 ? (f.grams / 1000).toFixed(2) + ' kg' : Math.round(f.grams) + ' g';
+        return `${esc(f.label)} <strong>${gTxt}</strong>`;
+      }).join(' · ') + '</small>'
+    : '';
+  if (!r.linhas.length) {
+    box.innerHTML = 'Os projetos escolhidos ainda não têm gramas ou tempo cadastrados.' + filHtml;
+    return;
+  }
   box.innerHTML = `Soma dos preços sugeridos: <strong>${formatMoney(r.sugerido)}</strong> <button class="btn btn-ghost btn-sm" style="margin-left:6px" onclick="usarPrecoSugeridoPacote(${r.sugerido})">Usar</button><br><small>${r.linhas.join(' · ')}</small><br><small>Custo estimado: ${formatMoney(r.custo)} · Margem desejada: ${margemDesejada()}%</small>`
+    + filHtml
     + (r.semFil.length ? `<br><small>⚠ Sem filamento escolhido (custo do material não incluído): ${r.semFil.join(', ')}.</small>` : '')
     + (r.semDados.length ? `<br><small>⚠ Sem gramas e tempo, ficaram fora da soma: ${r.semDados.join(', ')}.</small>` : '');
 }
