@@ -142,6 +142,11 @@
 
   <div id="page-pedidos" class="page">
     <div class="section-header"><h2>Pedidos</h2><button class="btn btn-primary btn-sm" onclick="abrirModalPedido()">+ Novo</button></div>
+    <div class="card mb-3" id="resumo-producao-card">
+      <h3>Fila de produção</h3>
+      <div class="text-sm text-muted mb-2">Itens a imprimir, ordenados pelo prazo de entrega</div>
+      <div id="resumo-producao"></div>
+    </div>
     <div class="chips" id="filtro-status">
       <button class="chip active" data-status="todos">Todos</button>
       <button class="chip" data-status="pendente">Pendente</button>
@@ -611,7 +616,91 @@ function excluirProjeto(id) {
   salvar(); renderProjetos();
 }
 
+function renderResumoProducao() {
+  const el = document.getElementById('resumo-producao');
+  if (!el) return;
+  // Pedidos ainda em produção (não concluídos/entregues/cancelados)
+  const ativos = state.pedidos.filter(p => !['concluido', 'entregue', 'cancelado'].includes(p.status));
+  // Linhas: item + qtd restante + prazo mais próximo + clientes
+  const map = {};
+  ativos.forEach(p => {
+    const prazo = p.prazo || '9999-12-31';
+    const cliente = p.cliente || 'Sem cliente';
+    // Prefer checklist (pecas) — já expande pacotes e tem "feito"
+    if (p.pecas && p.pecas.length) {
+      p.pecas.forEach(pc => {
+        if (pc.feito) return; // já pronto
+        const key = pc.projetoId || pc.nome || 'x';
+        const nome = pc.nome || '(item)';
+        const q = Math.max(1, Number(pc.qtd) || 1);
+        if (!map[key]) map[key] = { nome, qtd: 0, prazo: prazo, clientes: new Set(), atrasado: false };
+        map[key].qtd += q;
+        if (prazo < map[key].prazo) map[key].prazo = prazo;
+        map[key].clientes.add(cliente);
+        if (isAtrasado(p.prazo, p.status)) map[key].atrasado = true;
+      });
+    } else {
+      // Fallback: itens do pedido
+      itensDoPedido(p).forEach(it => {
+        if (it.tipo === 'pacote') {
+          const pac = state.pacotes.find(x => x.id === it.refId);
+          (pac && pac.itens || []).forEach(pi => {
+            const pr = state.projetos.find(x => x.id === pi.projetoId);
+            const key = pi.projetoId || pi.nome;
+            const nome = pr ? pr.nome : (pi.nome || '(projeto)');
+            const q = Math.max(1, Number(it.qtd) || 1) * Math.max(1, Number(pi.qtd) || 1);
+            if (!map[key]) map[key] = { nome, qtd: 0, prazo, clientes: new Set(), atrasado: false };
+            map[key].qtd += q;
+            if (prazo < map[key].prazo) map[key].prazo = prazo;
+            map[key].clientes.add(cliente);
+            if (isAtrasado(p.prazo, p.status)) map[key].atrasado = true;
+          });
+        } else {
+          const key = it.refId || it.nome;
+          const nome = it.nome || nomeCatalogo(it.tipo, it.refId);
+          const q = Math.max(1, Number(it.qtd) || 1);
+          if (!map[key]) map[key] = { nome, qtd: 0, prazo, clientes: new Set(), atrasado: false };
+          map[key].qtd += q;
+          if (prazo < map[key].prazo) map[key].prazo = prazo;
+          map[key].clientes.add(cliente);
+          if (isAtrasado(p.prazo, p.status)) map[key].atrasado = true;
+        }
+      });
+    }
+  });
+  const rows = Object.values(map).sort((a, b) => {
+    // Sem prazo no final; depois por prazo crescente; empate por nome
+    if (a.prazo === '9999-12-31' && b.prazo !== '9999-12-31') return 1;
+    if (b.prazo === '9999-12-31' && a.prazo !== '9999-12-31') return -1;
+    if (a.prazo !== b.prazo) return a.prazo.localeCompare(b.prazo);
+    return a.nome.localeCompare(b.nome, 'pt-BR');
+  });
+  if (!rows.length) {
+    el.innerHTML = '<div class="text-sm text-muted">Nada pendente de impressão.</div>';
+    return;
+  }
+  el.innerHTML = rows.map((r, idx) => {
+    const prazoTxt = r.prazo === '9999-12-31' ? 'Sem prazo' : formatDate(r.prazo);
+    const dias = r.prazo === '9999-12-31' ? null : diasRestantes(r.prazo);
+    let urg = '';
+    if (r.atrasado || (dias !== null && dias < 0)) urg = 'warning-text';
+    else if (dias !== null && dias <= 2) urg = 'warning-text';
+    const clientes = [...r.clientes].slice(0, 3).join(', ') + (r.clientes.size > 3 ? '…' : '');
+    return `<div style="display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);${idx === rows.length - 1 ? 'border-bottom:none' : ''}">
+      <div style="min-width:0">
+        <div style="font-weight:600;font-size:0.92rem">${esc(r.nome)} <span class="text-muted" style="font-weight:500">× ${r.qtd}</span></div>
+        <div class="meta">${esc(clientes)}</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div class="${urg}" style="font-size:0.85rem;font-weight:600">${prazoTxt}</div>
+        <div class="meta">${dias === null ? '' : dias < 0 ? `${Math.abs(dias)}d atrasado` : dias === 0 ? 'hoje' : `${dias}d`}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
 function renderPedidos() {
+  renderResumoProducao();
   const el=document.getElementById('lista-pedidos');
   let lista=state.pedidos.slice().sort((a,b)=>(b.data||'').localeCompare(a.data||''));
   if(filtroStatus==='atrasado') lista=lista.filter(p=>isAtrasado(p.prazo,p.status));
