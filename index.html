@@ -143,9 +143,14 @@
   <div id="page-pedidos" class="page">
     <div class="section-header"><h2>Pedidos</h2><button class="btn btn-primary btn-sm" onclick="abrirModalPedido()">+ Novo</button></div>
     <div class="card mb-3" id="resumo-producao-card">
-      <h3>Fila de produção</h3>
-      <div class="text-sm text-muted mb-2">Itens a imprimir, ordenados pelo prazo de entrega</div>
-      <div id="resumo-producao"></div>
+      <div onclick="toggleFilaProducao()" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none">
+        <h3 style="margin:0">Fila de produção <span id="fila-count" class="text-muted" style="font-weight:500;font-size:0.8rem"></span></h3>
+        <span id="fila-toggle-icon" class="text-muted" style="font-size:0.8rem">▶</span>
+      </div>
+      <div id="resumo-producao-body" class="hidden">
+        <div class="text-sm text-muted" style="margin:10px 0 8px">Itens a imprimir, ordenados pelo prazo de entrega</div>
+        <div id="resumo-producao"></div>
+      </div>
     </div>
     <div class="chips" id="filtro-status">
       <button class="chip active" data-status="todos">Todos</button>
@@ -584,7 +589,9 @@ function salvarPacote() {
   const dados = { nome, descricao: document.getElementById('m-pk-desc').value.trim(), preco: Number(document.getElementById('m-pk-preco').value) || 0, itens };
   if (editId) { const idx = state.pacotes.findIndex(x => x.id === editId); state.pacotes[idx] = { ...state.pacotes[idx], ...dados }; }
   else state.pacotes.push({ id: uid(), ...dados });
+  const n = sincronizarPedidosDoCatalogo();
   salvar(); fecharModal(); renderProjetos();
+  if (n > 0) mostrarToast(`${n} pedido(s) atualizado(s) com o pacote.`);
 }
 function excluirPacote(id) {
   if (!confirm('Excluir este pacote? Os pedidos já feitos com ele não são afetados.')) return;
@@ -604,7 +611,9 @@ function salvarProjeto() {
   const dados={ nome, descricao:document.getElementById('m-desc').value.trim(), filamentoId:document.getElementById('m-fil-proj').value||null, filamento_g:Number(document.getElementById('m-filamento').value)||0, tempo_h:Number(document.getElementById('m-tempo').value)||0, preco:Number(document.getElementById('m-preco').value)||0 };
   if(editId){ const idx=state.projetos.findIndex(x=>x.id===editId); state.projetos[idx]={...state.projetos[idx],...dados}; }
   else state.projetos.push({id:uid(),...dados});
+  const n = sincronizarPedidosDoCatalogo();
   salvar(); fecharModal(); renderProjetos();
+  if (n > 0) mostrarToast(`${n} pedido(s) atualizado(s) com o projeto.`);
 }
 
 function excluirProjeto(id) {
@@ -614,6 +623,62 @@ function excluirProjeto(id) {
   state.projetos = state.projetos.filter(x => x.id !== id);
   state.pacotes.forEach(k => { k.itens = (k.itens || []).filter(i => i.projetoId !== id); });
   salvar(); renderProjetos();
+}
+
+function toggleFilaProducao() {
+  const body = document.getElementById('resumo-producao-body');
+  const icon = document.getElementById('fila-toggle-icon');
+  if (!body) return;
+  const aberto = !body.classList.contains('hidden');
+  if (aberto) {
+    body.classList.add('hidden');
+    if (icon) icon.textContent = '▶';
+  } else {
+    body.classList.remove('hidden');
+    if (icon) icon.textContent = '▼';
+  }
+}
+
+function sincronizarPedidosDoCatalogo() {
+  // Atualiza pedidos abertos quando projeto/pacote muda no catálogo
+  let alterados = 0;
+  state.pedidos.forEach(p => {
+    if (p.status === 'cancelado') return;
+    let its = itensDoPedido(p);
+    if (!its.length) return;
+    let mudou = false;
+    its = its.map(it => {
+      const nome = nomeCatalogo(it.tipo, it.refId);
+      const preco = precoCatalogo(it.tipo, it.refId);
+      const next = { ...it, nome, preco_unit: preco };
+      if (!p.pago) {
+        next.valor = Math.round(preco * Math.max(1, Number(it.qtd) || 1) * 100) / 100;
+      }
+      if (next.nome !== it.nome || next.preco_unit !== it.preco_unit || next.valor !== it.valor) mudou = true;
+      return next;
+    });
+    p.itens = its;
+    // Legado
+    const prim = its[0];
+    if (prim) {
+      p.projetoId = prim.tipo === 'projeto' ? prim.refId : null;
+      p.pacoteId = prim.tipo === 'pacote' ? prim.refId : null;
+      p.projetoNome = prim.tipo === 'projeto' ? prim.nome : '';
+      p.pacoteNome = prim.tipo === 'pacote' ? prim.nome : (its.length > 1 ? 'Vários itens' : '');
+    }
+    if (!p.pago) {
+      const novoValor = its.reduce((s, i) => s + (Number(i.valor) || 0), 0);
+      if (Number(p.valor) !== novoValor) { p.valor = novoValor; mudou = true; }
+    }
+    // Reconstrói checklist em pedidos ainda em produção
+    if (['pendente', 'producao'].includes(p.status)) {
+      const novas = montarPecasDeItens(its, p.pecas || []);
+      p.pecas = novas;
+      mudou = true;
+    }
+    if (mudou) alterados++;
+  });
+  return alterados;
 }
 
 function renderResumoProducao() {
@@ -675,10 +740,14 @@ function renderResumoProducao() {
     if (a.prazo !== b.prazo) return a.prazo.localeCompare(b.prazo);
     return a.nome.localeCompare(b.nome, 'pt-BR');
   });
+  const contador = document.getElementById('fila-count');
   if (!rows.length) {
     el.innerHTML = '<div class="text-sm text-muted">Nada pendente de impressão.</div>';
+    if (contador) contador.textContent = '';
     return;
   }
+  const totalPecas = rows.reduce((s, r) => s + r.qtd, 0);
+  if (contador) contador.textContent = `· ${rows.length} tipo${rows.length !== 1 ? 's' : ''} · ${totalPecas} un.`;
   el.innerHTML = rows.map((r, idx) => {
     const prazoTxt = r.prazo === '9999-12-31' ? 'Sem prazo' : formatDate(r.prazo);
     const dias = r.prazo === '9999-12-31' ? null : diasRestantes(r.prazo);
