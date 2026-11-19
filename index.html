@@ -271,7 +271,7 @@ let busca = { projetos: '', pedidos: '', caixa: '', filamentos: '' };
 let fPed = { tipo: 'todos', pago: 'todos', periodo: 'todos' };
 let fCx = { cat: 'todos', mes: 'todos' };
 let fFil = { material: 'todos' };
-let itensTemp = [], pecasModal = [];
+let itensTemp = [], pecasModal = [], pedidoItensTemp = [];
 
 function iniciarFirebase() {
   docRef.onSnapshot((snap) => {
@@ -339,36 +339,58 @@ function isAtrasado(prazo, status) { if (!prazo || ['entregue','cancelado'].incl
 function diasRestantes(prazo) { if (!prazo) return null; return Math.ceil((new Date(prazo+'T12:00:00') - new Date()) / 86400000); }
 function esc(str) { if (!str) return ''; return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
+function itensDoPedido(p) {
+  // Compatível com pedidos antigos (1 projeto/pacote) e novos (várias linhas)
+  if (p.itens && p.itens.length) return p.itens;
+  if (p.pacoteId) return [{ tipo: 'pacote', refId: p.pacoteId, nome: p.pacoteNome || '', qtd: p.qtd || 1, valor: Number(p.valor) || 0 }];
+  if (p.projetoId) return [{ tipo: 'projeto', refId: p.projetoId, nome: p.projetoNome || '', qtd: p.qtd || 1, valor: Number(p.valor) || 0 }];
+  return [];
+}
+function nomeItensPedido(p) {
+  const its = itensDoPedido(p);
+  if (!its.length) return p.projetoNome || p.pacoteNome || '—';
+  return its.map(i => `${i.qtd||1}× ${i.nome || 'item'}`).join(' · ');
+}
 function calcularCustoPedido(p) {
   const cfg = state.config;
-  const proj = state.projetos.find(x => x.id === p.projetoId);
-  const fil = state.filamentos.find(x => x.id === (p.filamentoId || (proj && proj.filamentoId)));
-  const ePac = !!(p.pacoteId && p.pecas && p.pecas.length);
-  let gAuto = 0, hAuto = 0, cFilAuto = 0; const kgs = [];
-  if (ePac) {
-    p.pecas.forEach(pc => {
-      const pr = state.projetos.find(x => x.id === pc.projetoId);
-      const f = state.filamentos.find(x => x.id === (pc.filamentoId || (pr && pr.filamentoId)));
-      const g = pr ? (Number(pr.filamento_g) || 0) : 0, h = pr ? (Number(pr.tempo_h) || 0) : 0;
-      const ck = f ? (Number(f.custo_kg) || 0) : 0;
-      gAuto += g; hAuto += h; cFilAuto += (g / 1000) * ck; if (f) kgs.push(ck);
-    });
-  }
-  const manualG = Number(p.filamento_g) || 0;
-  const grams = manualG || (ePac ? gAuto : (proj ? Number(proj.filamento_g) * (p.qtd||1) : 0));
-  const horas = Number(p.tempo_h) || (ePac ? hAuto : (proj ? Number(proj.tempo_h) * (p.qtd||1) : 0));
-  const custoKg = ePac ? (kgs.length ? kgs.reduce((a, b) => a + b, 0) / kgs.length : 0) : (fil ? Number(fil.custo_kg) : 0);
-  const custoFilamento = (ePac && !manualG) ? cFilAuto : (grams/1000) * custoKg;
-  const custoEnergia = horas * (Number(cfg.custo_energia_hora)||0);
-  const custoMaquina = horas * (Number(cfg.custo_hora_maquina)||0);
+  const its = itensDoPedido(p);
+  let grams = 0, horas = 0, custoFilamento = 0;
+  const addProj = (pr, q) => {
+    if (!pr) return;
+    const g = (Number(pr.filamento_g) || 0) * q;
+    const h = (Number(pr.tempo_h) || 0) * q;
+    const fil = state.filamentos.find(f => f.id === pr.filamentoId);
+    const ck = fil ? (Number(fil.custo_kg) || 0) : 0;
+    grams += g; horas += h; custoFilamento += (g / 1000) * ck;
+  };
+  its.forEach(it => {
+    const q = Math.max(1, Number(it.qtd) || 1);
+    if (it.tipo === 'pacote') {
+      const pac = state.pacotes.find(x => x.id === it.refId);
+      (pac && pac.itens || []).forEach(pi => {
+        const pr = state.projetos.find(x => x.id === pi.projetoId);
+        addProj(pr, q * Math.max(1, Number(pi.qtd) || 1));
+      });
+    } else {
+      addProj(state.projetos.find(x => x.id === it.refId), q);
+    }
+  });
+  // Override manual (legado)
+  if (Number(p.filamento_g) > 0) grams = Number(p.filamento_g);
+  if (Number(p.tempo_h) > 0) horas = Number(p.tempo_h);
+  const custoEnergia = horas * (Number(cfg.custo_energia_hora) || 0);
+  const custoMaquina = horas * (Number(cfg.custo_hora_maquina) || 0);
   const base = custoFilamento + custoEnergia + custoMaquina;
-  const taxa = (Number(cfg.taxa_falha)||0)/100;
-  const frete = Number(p.frete)||0;
-  const ckF = f => { const ff = state.filamentos.find(x => x.id === f.filamentoId); return ff ? (Number(ff.custo_kg)||0) : custoKg; };
-  const falhasExtra = (p.falhas||[]).reduce((s,f) => s + ((Number(f.filamento_g)||0)/1000*ckF(f)) + ((Number(f.tempo_h)||0)*((Number(cfg.custo_energia_hora)||0)+(Number(cfg.custo_hora_maquina)||0))), 0);
-  const custoTotal = base*(1+taxa) + frete + falhasExtra;
-  const receita = Number(p.valor)||0;
-  return { grams, horas, custoTotal, receita, lucro: receita - custoTotal, margem: receita>0 ? ((receita-custoTotal)/receita*100) : 0 };
+  const taxa = (Number(cfg.taxa_falha) || 0) / 100;
+  const frete = Number(p.frete) || 0;
+  const ckF = f => {
+    const ff = state.filamentos.find(x => x.id === f.filamentoId);
+    return ff ? (Number(ff.custo_kg) || 0) : 0;
+  };
+  const falhasExtra = (p.falhas || []).reduce((s, f) => s + ((Number(f.filamento_g) || 0) / 1000 * ckF(f)) + ((Number(f.tempo_h) || 0) * ((Number(cfg.custo_energia_hora) || 0) + (Number(cfg.custo_hora_maquina) || 0))), 0);
+  const custoTotal = base * (1 + taxa) + frete + falhasExtra;
+  const receita = Number(p.valor) || 0;
+  return { grams, horas, custoTotal, receita, lucro: receita - custoTotal, margem: receita > 0 ? ((receita - custoTotal) / receita * 100) : 0 };
 }
 
 function navegar(page) {
@@ -595,7 +617,10 @@ function renderPedidos() {
   if(filtroStatus==='atrasado') lista=lista.filter(p=>isAtrasado(p.prazo,p.status));
   else if(filtroStatus!=='todos') lista=lista.filter(p=>p.status===filtroStatus);
   const q=norm(busca.pedidos);
-  if(q) lista=lista.filter(p=>{ const pr=state.projetos.find(x=>x.id===p.projetoId); return norm([p.cliente,p.projetoNome,p.pacoteNome,pr&&pr.nome,p.obs,(p.pecas||[]).map(x=>x.nome).join(' ')].join(' ')).includes(q); });
+  if(q) lista=lista.filter(p=>{
+    const nomes = itensDoPedido(p).map(i => i.nome).join(' ');
+    return norm([p.cliente, p.projetoNome, p.pacoteNome, nomes, p.obs, (p.pecas||[]).map(x=>x.nome).join(' ')].join(' ')).includes(q);
+  });
   if(fPed.tipo!=='todos') lista=lista.filter(p=>(p.tipo_cliente==='pj'?'pj':'pf')===fPed.tipo);
   if(fPed.pago==='pago') lista=lista.filter(p=>p.pago); else if(fPed.pago==='aberto') lista=lista.filter(p=>!p.pago);
   if(fPed.periodo==='mes') lista=lista.filter(p=>(p.data||'').startsWith(localYM(0)));
@@ -603,93 +628,307 @@ function renderPedidos() {
   else if(fPed.periodo==='30d') lista=lista.filter(p=>(p.data||'')>=localDateStr(30));
   if(!lista.length){ el.innerHTML='<div class="empty"><div class="icon">▣</div>Nenhum pedido encontrado.</div>'; return; }
   el.innerHTML=lista.map(p=>{
-    const proj=state.projetos.find(x=>x.id===p.projetoId); const nomeProj=p.pacoteId?(p.pacoteNome||'Pacote'):(proj?proj.nome:(p.projetoNome||'—'));
+    const its = itensDoPedido(p);
+    const multi = its.length > 1;
+    const temPacote = its.some(i => i.tipo === 'pacote') || !!p.pacoteId;
+    const nomeLinha = nomeItensPedido(p);
     const atrasado=isAtrasado(p.prazo,p.status); const statusClass=atrasado?'status-atrasado':'status-'+p.status; const statusLabel=atrasado?'ATRASADO':p.status;
-    const tipoTag=(p.tipo_cliente==='pj'?'<span class="tag-pj">PJ</span>':'<span class="tag-pf">PF</span>')+(p.pacoteId?' <span class="tag-pk">PACOTE</span>':'');
+    const tipoTag=(p.tipo_cliente==='pj'?'<span class="tag-pj">PJ</span>':'<span class="tag-pf">PF</span>')+(temPacote?' <span class="tag-pk">PACOTE</span>':'')+(multi?' <span class="tag-pk">MULTI</span>':'');
     const custo=calcularCustoPedido(p);
-    const checklist=(p.pacoteId&&p.pecas&&p.pecas.length)?(()=>{ const feitas=p.pecas.filter(x=>x.feito).length; return `<div class="checklist"><div class="check-head">Peças prontas: ${feitas}/${p.pecas.length}</div>`+p.pecas.map((pc,i)=>{ const prx=state.projetos.find(x=>x.id===pc.projetoId); const f=state.filamentos.find(x=>x.id===(pc.filamentoId||(prx&&prx.filamentoId))); const extra=[(p.qtd>1?'pacote '+(pc.kit||1):''), f?esc(f.material+' '+f.cor):''].filter(Boolean).join(' · '); return `<label class="check-item ${pc.feito?'done':''}"><input type="checkbox" ${pc.feito?'checked':''} onchange="togglePeca('${p.id}',${i})"><span>${esc(pc.nome)}${extra?` <small>${extra}</small>`:''}</span></label>`; }).join('')+`</div>`; })():'';
+    const checklist=(p.pecas&&p.pecas.length)?(()=>{
+      const feitas=p.pecas.filter(x=>x.feito).length;
+      return `<div class="checklist"><div class="check-head">Produção: ${feitas}/${p.pecas.length}</div>`+
+        p.pecas.map((pc,i)=>{
+          const prx=state.projetos.find(x=>x.id===pc.projetoId);
+          const f=state.filamentos.find(x=>x.id===(pc.filamentoId||(prx&&prx.filamentoId)));
+          const qtdTxt = (pc.qtd && pc.qtd > 1) ? ` × ${pc.qtd}` : '';
+          const extra=[pc.pacoteNome?('pacote '+pc.pacoteNome):'', f?esc(f.material+' '+f.cor):''].filter(Boolean).join(' · ');
+          return `<label class="check-item ${pc.feito?'done':''}"><input type="checkbox" ${pc.feito?'checked':''} onchange="togglePeca('${p.id}',${i})"><span>${esc(pc.nome)}${qtdTxt}${extra?` <small>${extra}</small>`:''}</span></label>`;
+        }).join('')+`</div>`;
+    })():'';
     const lucroTxt=p.status==='cancelado'?'':`<span class="${custo.lucro>=0?'profit-positive':'profit-negative'}">${formatMoney(custo.lucro)}</span>`;
-    return `<div class="list-item"><div class="top"><div><div class="title">${esc(p.cliente||'Sem cliente')} ${tipoTag}</div><div class="meta">${esc(nomeProj)} × ${p.qtd||1}</div></div><span class="status ${statusClass}">${statusLabel}</span></div><div class="meta">${formatDate(p.data)} → ${formatDate(p.prazo)} · ${formatMoney(p.valor)} ${p.pago?' · ✓ Pago':' · ○ Aberto'} ${lucroTxt?' · Lucro est.: '+lucroTxt:''}</div>${checklist}<div class="actions">${botaoAvancar(p)}<button class="btn btn-ghost btn-sm" onclick="abrirModalPedido('${p.id}')">Editar</button><button class="btn btn-ghost btn-sm" onclick="duplicarPedido('${p.id}')">Duplicar</button>${!['entregue','cancelado'].includes(p.status)?`<button class="btn btn-warning btn-sm" onclick="abrirModalFalha('${p.id}')">Falha</button>`:''}<button class="btn btn-danger btn-sm" onclick="excluirPedido('${p.id}')">Excluir</button></div></div>`;
+    return `<div class="list-item"><div class="top"><div><div class="title">${esc(p.cliente||'Sem cliente')} ${tipoTag}</div><div class="meta">${esc(nomeLinha)}</div></div><span class="status ${statusClass}">${statusLabel}</span></div><div class="meta">${formatDate(p.data)} → ${formatDate(p.prazo)} · ${formatMoney(p.valor)} ${p.pago?' · ✓ Pago':' · ○ Aberto'} ${lucroTxt?' · Lucro est.: '+lucroTxt:''}</div>${checklist}<div class="actions">${botaoAvancar(p)}<button class="btn btn-ghost btn-sm" onclick="abrirModalPedido('${p.id}')">Editar</button><button class="btn btn-ghost btn-sm" onclick="duplicarPedido('${p.id}')">Duplicar</button>${!['entregue','cancelado'].includes(p.status)?`<button class="btn btn-warning btn-sm" onclick="abrirModalFalha('${p.id}')">Falha</button>`:''}<button class="btn btn-danger btn-sm" onclick="excluirPedido('${p.id}')">Excluir</button></div></div>`;
   }).join('');
 }
 
-function montarPecas(pac, qtd) {
-  const out = [];
-  for (let k = 0; k < qtd; k++) {
-    (pac.itens || []).forEach(it => {
-      const pr = state.projetos.find(x => x.id === it.projetoId);
-      for (let q = 0; q < (Number(it.qtd) || 1); q++) out.push({ projetoId: it.projetoId, nome: pr ? pr.nome : '(projeto removido)', kit: k + 1, filamentoId: null, feito: false });
-    });
+function precoCatalogo(tipo, refId) {
+  if (tipo === 'pacote') {
+    const k = state.pacotes.find(x => x.id === refId);
+    return k ? (Number(k.preco) || 0) : 0;
   }
-  return out;
+  const pr = state.projetos.find(x => x.id === refId);
+  return pr ? (Number(pr.preco) || 0) : 0;
 }
-function renderPecasModal() {
-  const sel = document.getElementById('m-projeto').value;
-  if (!sel.startsWith('k:')) return;
-  const pac = state.pacotes.find(x => x.id === sel.slice(2)); if (!pac) return;
-  const qtd = Math.max(1, parseInt(document.getElementById('m-qtd').value) || 1);
-  const novas = montarPecas(pac, qtd);
-  novas.forEach((n, i) => { const o = pecasModal[i]; if (o && o.projetoId === n.projetoId) { n.filamentoId = o.filamentoId || null; n.feito = o.feito; } });
-  pecasModal = novas;
+function nomeCatalogo(tipo, refId) {
+  if (tipo === 'pacote') {
+    const k = state.pacotes.find(x => x.id === refId);
+    return k ? k.nome : '(pacote removido)';
+  }
+  const pr = state.projetos.find(x => x.id === refId);
+  return pr ? pr.nome : '(projeto removido)';
+}
+function montarPecasDeItens(itens, pecasAntigas) {
+  // Checklist agregado: uma linha por projeto, com quantidade total
+  const map = {};
+  (itens || []).forEach(it => {
+    const qLinha = Math.max(1, Number(it.qtd) || 1);
+    if (it.tipo === 'pacote') {
+      const pac = state.pacotes.find(x => x.id === it.refId);
+      (pac && pac.itens || []).forEach(pi => {
+        const pr = state.projetos.find(x => x.id === pi.projetoId);
+        const q = qLinha * Math.max(1, Number(pi.qtd) || 1);
+        const id = pi.projetoId || ('x-' + Math.random());
+        if (!map[id]) map[id] = { projetoId: pi.projetoId, nome: pr ? pr.nome : '(projeto removido)', qtd: 0, filamentoId: pr ? (pr.filamentoId || null) : null, feito: false, origem: 'pacote', pacoteNome: pac ? pac.nome : '' };
+        map[id].qtd += q;
+      });
+    } else {
+      const pr = state.projetos.find(x => x.id === it.refId);
+      const id = it.refId || ('x-' + Math.random());
+      if (!map[id]) map[id] = { projetoId: it.refId, nome: pr ? pr.nome : (it.nome || '(projeto removido)'), qtd: 0, filamentoId: pr ? (pr.filamentoId || null) : null, feito: false, origem: 'projeto' };
+      map[id].qtd += qLinha;
+    }
+  });
+  // Preserva "feito" de checklist anterior quando o mesmo projeto continua
+  const ant = {};
+  (pecasAntigas || []).forEach(pc => { if (pc.projetoId) ant[pc.projetoId] = pc; });
+  return Object.values(map).map(pc => {
+    const a = ant[pc.projetoId];
+    if (a) { pc.feito = !!a.feito; if (a.filamentoId) pc.filamentoId = a.filamentoId; }
+    return pc;
+  });
 }
 
-function abrirModalPedido(id=null, base=null) {
-  editId=id; const p=id?state.pedidos.find(x=>x.id===id):(base||{});
-  pecasModal = (p.pecas || []).map(x => ({ ...x }));
-  const optsProj=state.projetos.map(pr=>`<option value="p:${pr.id}" ${p.projetoId===pr.id&&!p.pacoteId?'selected':''}>${esc(pr.nome)}</option>`).join('');
-  const optsPac=state.pacotes.map(k=>`<option value="k:${k.id}" ${p.pacoteId===k.id?'selected':''}>${esc(k.nome)}</option>`).join('');
-  document.getElementById('modal-content').innerHTML=`<h2>${id?'Editar':'Novo'} Pedido</h2><div class="form-group"><label>Cliente *</label><input id="m-cliente" value="${esc(p.cliente||'')}" placeholder="Nome do cliente"></div><div class="form-group"><label>Tipo de Cliente</label><select id="m-tipo-cliente"><option value="pf" ${p.tipo_cliente!=='pj'?'selected':''}>Pessoa Física (PF)</option><option value="pj" ${p.tipo_cliente==='pj'?'selected':''}>Pessoa Jurídica (PJ)</option></select></div><div class="form-group"><label>Projeto ou pacote</label><select id="m-projeto"><option value="">— Selecione —</option>${optsPac?`<optgroup label="Pacotes">${optsPac}</optgroup>`:''}<optgroup label="Projetos">${optsProj}</optgroup></select></div><div class="form-row"><div class="form-group"><label>Quantidade</label><input id="m-qtd" type="number" min="1" value="${p.qtd||1}"></div><div class="form-group"><label>Valor total (R$)</label><input id="m-valor" type="number" step="0.01" value="${p.valor||''}"></div></div><div class="form-row"><div class="form-group"><label>Data do pedido</label><input id="m-data" type="date" value="${p.data||hoje()}"></div><div class="form-group"><label>Prazo de entrega</label><input id="m-prazo" type="date" value="${p.prazo||''}"></div></div><div class="form-group"><label>Status</label><select id="m-status"><option value="pendente" ${p.status==='pendente'?'selected':''}>Pendente</option><option value="producao" ${p.status==='producao'?'selected':''}>Em produção</option><option value="concluido" ${p.status==='concluido'?'selected':''}>Concluído</option><option value="entregue" ${p.status==='entregue'?'selected':''}>Entregue</option><option value="cancelado" ${p.status==='cancelado'?'selected':''}>Cancelado</option></select></div><div class="form-row"><div class="form-group"><label>Filamento real usado (g)</label><input id="m-filamento" type="number" value="${p.filamento_g||''}" placeholder="Vazio = média"></div><div class="form-group"><label>Tempo real (h)</label><input id="m-tempo" type="number" step="0.1" value="${p.tempo_h||''}" placeholder="Vazio = média"></div></div><div class="form-group"><label>Frete / Entrega (R$)</label><input id="m-frete" type="number" step="0.01" value="${p.frete||0}"></div><div class="form-group"><label><input type="checkbox" id="m-pago" ${p.pago?'checked':''}> Já foi pago?</label></div><div class="form-group"><label>Observações</label><textarea id="m-obs">${esc(p.obs||'')}</textarea></div><div class="modal-actions"><button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button><button class="btn btn-primary" onclick="salvarPedido()">Salvar</button></div>`;
-  const selProj=document.getElementById('m-projeto');
-  selProj.value = p.pacoteId ? 'k:'+p.pacoteId : (p.projetoId ? 'p:'+p.projetoId : '');
-  selProj.addEventListener('change', e=>{
-    const v=e.target.value; let preco=null;
-    if(v.startsWith('k:')){ const k=state.pacotes.find(x=>x.id===v.slice(2)); if(k) preco=k.preco; }
-    else if(v.startsWith('p:')){ const pr=state.projetos.find(x=>x.id===v.slice(2)); if(pr) preco=pr.preco; }
-    if(preco!==null && !document.getElementById('m-valor').value){ const qtd=Number(document.getElementById('m-qtd').value)||1; document.getElementById('m-valor').value=((Number(preco)||0)*qtd).toFixed(2); }
-    renderPecasModal();
+function renderPedidoItensModal() {
+  const box = document.getElementById('pd-itens');
+  if (!box) return;
+  const opts = () => {
+    let h = '<option value="">— Selecione —</option>';
+    if (state.pacotes.length) {
+      h += '<optgroup label="Pacotes">';
+      state.pacotes.forEach(k => { h += `<option value="k:${k.id}">${esc(k.nome)} (${formatMoney(k.preco)})</option>`; });
+      h += '</optgroup>';
+    }
+    h += '<optgroup label="Projetos">';
+    state.projetos.forEach(pr => { h += `<option value="p:${pr.id}">${esc(pr.nome)} (${formatMoney(pr.preco)})</option>`; });
+    h += '</optgroup>';
+    return h;
+  };
+  box.innerHTML = pedidoItensTemp.map((it, i) => {
+    const val = it.refId ? ((it.tipo === 'pacote' ? 'k:' : 'p:') + it.refId) : '';
+    return `<div style="display:grid;grid-template-columns:1fr 64px 88px 36px;gap:6px;margin-bottom:8px;align-items:center">
+      <select class="pd-ref" data-i="${i}">${opts()}</select>
+      <input class="pd-qtd" data-i="${i}" type="number" min="1" value="${it.qtd||1}" title="Qtd">
+      <input class="pd-valor" data-i="${i}" type="number" step="0.01" value="${it.valor != null ? Number(it.valor).toFixed(2) : ''}" title="Valor da linha">
+      <button type="button" class="btn btn-danger btn-sm" onclick="pedidoRemItem(${i})">✕</button>
+    </div>`;
+  }).join('') || '<div class="text-sm text-muted">Nenhum item. Clique em + Adicionar.</div>';
+  // Restaura seleção (options recriadas)
+  box.querySelectorAll('.pd-ref').forEach(sel => {
+    const i = Number(sel.dataset.i);
+    const it = pedidoItensTemp[i];
+    if (it && it.refId) sel.value = (it.tipo === 'pacote' ? 'k:' : 'p:') + it.refId;
   });
-  document.getElementById('m-qtd').addEventListener('input', renderPecasModal);
-  renderPecasModal();
+  box.querySelectorAll('.pd-ref').forEach(sel => sel.addEventListener('change', onPedidoItemChange));
+  box.querySelectorAll('.pd-qtd').forEach(inp => inp.addEventListener('input', onPedidoItemChange));
+  box.querySelectorAll('.pd-valor').forEach(inp => inp.addEventListener('input', () => {
+    const i = Number(inp.dataset.i);
+    pedidoItensTemp[i].valor = Number(inp.value) || 0;
+    pedidoItensTemp[i]._manual = true;
+    atualizarTotalPedidoModal();
+  }));
+  atualizarTotalPedidoModal();
+}
+function onPedidoItemChange(e) {
+  const el = e.target;
+  const i = Number(el.dataset.i);
+  const it = pedidoItensTemp[i];
+  if (!it) return;
+  if (el.classList.contains('pd-ref')) {
+    const v = el.value;
+    if (v.startsWith('k:')) { it.tipo = 'pacote'; it.refId = v.slice(2); }
+    else if (v.startsWith('p:')) { it.tipo = 'projeto'; it.refId = v.slice(2); }
+    else { it.tipo = ''; it.refId = ''; }
+    it.nome = it.refId ? nomeCatalogo(it.tipo, it.refId) : '';
+    it.preco_unit = it.refId ? precoCatalogo(it.tipo, it.refId) : 0;
+    it._manual = false;
+  }
+  if (el.classList.contains('pd-qtd')) {
+    it.qtd = Math.max(1, parseInt(el.value) || 1);
+    it._manual = false;
+  }
+  if (!it._manual && it.refId) {
+    it.valor = Math.round((it.preco_unit || precoCatalogo(it.tipo, it.refId)) * (it.qtd || 1) * 100) / 100;
+  }
+  renderPedidoItensModal();
+}
+function atualizarTotalPedidoModal() {
+  const total = pedidoItensTemp.reduce((s, it) => s + (Number(it.valor) || 0), 0);
+  const el = document.getElementById('m-valor');
+  if (el) el.value = total > 0 ? total.toFixed(2) : '';
+  const lab = document.getElementById('pd-total-label');
+  if (lab) lab.textContent = total > 0 ? 'Total: ' + formatMoney(total) : '';
+}
+function pedidoAddItem() {
+  pedidoItensTemp.push({ tipo: '', refId: '', nome: '', qtd: 1, preco_unit: 0, valor: 0 });
+  renderPedidoItensModal();
+}
+function pedidoRemItem(i) {
+  pedidoItensTemp.splice(i, 1);
+  if (!pedidoItensTemp.length) pedidoItensTemp.push({ tipo: '', refId: '', nome: '', qtd: 1, preco_unit: 0, valor: 0 });
+  renderPedidoItensModal();
+}
+
+function abrirModalPedido(id = null, base = null) {
+  editId = id;
+  const p = id ? state.pedidos.find(x => x.id === id) : (base || {});
+  // Carrega itens (novo formato ou legado)
+  const its = itensDoPedido(p);
+  if (its.length) {
+    pedidoItensTemp = its.map(i => ({
+      tipo: i.tipo || (i.pacoteId ? 'pacote' : 'projeto'),
+      refId: i.refId || i.pacoteId || i.projetoId || '',
+      nome: i.nome || '',
+      qtd: i.qtd || 1,
+      preco_unit: i.preco_unit || 0,
+      valor: Number(i.valor) || 0,
+      _manual: true
+    }));
+  } else {
+    pedidoItensTemp = [{ tipo: '', refId: '', nome: '', qtd: 1, preco_unit: 0, valor: 0 }];
+  }
+  document.getElementById('modal-content').innerHTML = `<h2>${id ? 'Editar' : 'Novo'} Pedido</h2>
+    <div class="form-group"><label>Cliente *</label><input id="m-cliente" value="${esc(p.cliente || '')}" placeholder="Nome do cliente"></div>
+    <div class="form-group"><label>Tipo de Cliente</label>
+      <select id="m-tipo-cliente">
+        <option value="pf" ${p.tipo_cliente !== 'pj' ? 'selected' : ''}>Pessoa Física (PF)</option>
+        <option value="pj" ${p.tipo_cliente === 'pj' ? 'selected' : ''}>Pessoa Jurídica (PJ)</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Itens do pedido</label>
+      <div class="text-sm text-muted mb-2">Projeto ou pacote · qtd · valor da linha</div>
+      <div id="pd-itens"></div>
+      <button type="button" class="btn btn-ghost btn-sm mt-2" onclick="pedidoAddItem()">+ Adicionar item</button>
+      <div id="pd-total-label" class="text-sm mt-2" style="font-weight:600"></div>
+    </div>
+    <div class="form-group"><label>Valor total (R$)</label><input id="m-valor" type="number" step="0.01" value="${p.valor || ''}"><div class="text-sm text-muted mt-2">Calculado automaticamente. Pode ajustar (desconto etc.).</div></div>
+    <div class="form-row">
+      <div class="form-group"><label>Data do pedido</label><input id="m-data" type="date" value="${p.data || hoje()}"></div>
+      <div class="form-group"><label>Prazo de entrega</label><input id="m-prazo" type="date" value="${p.prazo || ''}"></div>
+    </div>
+    <div class="form-group"><label>Status</label>
+      <select id="m-status">
+        <option value="pendente" ${p.status === 'pendente' ? 'selected' : ''}>Pendente</option>
+        <option value="producao" ${p.status === 'producao' ? 'selected' : ''}>Em produção</option>
+        <option value="concluido" ${p.status === 'concluido' ? 'selected' : ''}>Concluído</option>
+        <option value="entregue" ${p.status === 'entregue' ? 'selected' : ''}>Entregue</option>
+        <option value="cancelado" ${p.status === 'cancelado' ? 'selected' : ''}>Cancelado</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Frete / Entrega (R$)</label><input id="m-frete" type="number" step="0.01" value="${p.frete || 0}"></div>
+    <div class="form-group"><label><input type="checkbox" id="m-pago" ${p.pago ? 'checked' : ''}> Já foi pago?</label></div>
+    <div class="form-group"><label>Observações</label><textarea id="m-obs">${esc(p.obs || '')}</textarea></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="salvarPedido()">Salvar</button>
+    </div>`;
+  renderPedidoItensModal();
   document.getElementById('modal').classList.add('open');
 }
 
 function salvarPedido() {
-  const cliente=document.getElementById('m-cliente').value.trim(); if(!cliente) return alert('Cliente é obrigatório');
-  const sel=document.getElementById('m-projeto').value;
-  const projetoId=sel.startsWith('p:')?sel.slice(2):null; const pacoteId=sel.startsWith('k:')?sel.slice(2):null;
-  const proj=state.projetos.find(x=>x.id===projetoId); const pac=state.pacotes.find(x=>x.id===pacoteId);
-  const novoStatus=document.getElementById('m-status').value; const anterior=editId?state.pedidos.find(x=>x.id===editId):null;
-  const mesmoProj=!!anterior && (anterior.projetoId||null)===projetoId && (anterior.pacoteId||null)===pacoteId;
-  const filamentoId=mesmoProj?(anterior.filamentoId||null):null;
-  let pecas=[];
-  if(pac){ renderPecasModal(); pecas=pecasModal.map(x=>({projetoId:x.projetoId,nome:x.nome,kit:x.kit,filamentoId:x.filamentoId||null,feito:!!x.feito})); }
-  const dados={ cliente, tipo_cliente:document.getElementById('m-tipo-cliente').value, projetoId, projetoNome:proj?proj.nome:(pac?pac.nome:''), pacoteId, pacoteNome:pac?pac.nome:'', pecas, filamentoId, qtd:Number(document.getElementById('m-qtd').value)||1, valor:Number(document.getElementById('m-valor').value)||0, data:document.getElementById('m-data').value, prazo:document.getElementById('m-prazo').value, status:novoStatus, filamento_g:document.getElementById('m-filamento').value?Number(document.getElementById('m-filamento').value):null, tempo_h:document.getElementById('m-tempo').value?Number(document.getElementById('m-tempo').value):null, frete:Number(document.getElementById('m-frete').value)||0, pago:document.getElementById('m-pago').checked, obs:document.getElementById('m-obs').value.trim(), falhas:editId?(state.pedidos.find(x=>x.id===editId)?.falhas||[]):[] };
-  let pedidoAnterior=null;
-  if(editId){ const idx=state.pedidos.findIndex(x=>x.id===editId); pedidoAnterior={...state.pedidos[idx]}; state.pedidos[idx]={...state.pedidos[idx],...dados}; }
-  else state.pedidos.push({id:uid(), ...dados});
-  const pedidoAtual=editId?state.pedidos.find(x=>x.id===editId):state.pedidos[state.pedidos.length-1];
-  const eraPago=pedidoAnterior?pedidoAnterior.pago:false;
-  if(dados.pago && !eraPago && dados.valor>0){ state.transacoes.push({ id:uid(), tipo:'entrada', valor:dados.valor, data:hoje(), categoria:'Venda', descricao:`Pedido - ${dados.cliente} (${dados.projetoNome||'avulso'})`, pedidoId:pedidoAtual.id }); }
-  if(!dados.pago && eraPago){
-    const vinc=state.transacoes.filter(t=>t.pedidoId===pedidoAtual.id);
-    if(vinc.length && confirm(`Você desmarcou "pago". Remover do caixa o lançamento de entrada deste pedido (${vinc.map(t=>formatMoney(t.valor)).join(', ')})?\n\nOK = remover · Cancelar = manter no caixa`)) state.transacoes=state.transacoes.filter(t=>t.pedidoId!==pedidoAtual.id);
+  const cliente = document.getElementById('m-cliente').value.trim();
+  if (!cliente) return alert('Cliente é obrigatório');
+  // Lê valores atuais dos inputs (caso o usuário tenha digitado sem blur)
+  document.querySelectorAll('#pd-itens .pd-qtd').forEach(inp => {
+    const i = Number(inp.dataset.i);
+    if (pedidoItensTemp[i]) pedidoItensTemp[i].qtd = Math.max(1, parseInt(inp.value) || 1);
+  });
+  document.querySelectorAll('#pd-itens .pd-valor').forEach(inp => {
+    const i = Number(inp.dataset.i);
+    if (pedidoItensTemp[i]) pedidoItensTemp[i].valor = Number(inp.value) || 0;
+  });
+  const itens = pedidoItensTemp.filter(it => it.refId).map(it => ({
+    tipo: it.tipo,
+    refId: it.refId,
+    nome: it.nome || nomeCatalogo(it.tipo, it.refId),
+    qtd: Math.max(1, Number(it.qtd) || 1),
+    preco_unit: Number(it.preco_unit) || precoCatalogo(it.tipo, it.refId),
+    valor: Number(it.valor) || 0
+  }));
+  if (!itens.length) return alert('Adicione pelo menos um projeto ou pacote');
+  const anterior = editId ? state.pedidos.find(x => x.id === editId) : null;
+  const pecas = montarPecasDeItens(itens, anterior ? anterior.pecas : []);
+  const valorTotal = Number(document.getElementById('m-valor').value) || itens.reduce((s, i) => s + (Number(i.valor) || 0), 0);
+  // Campos legados (primeiro item) para não quebrar buscas/relatórios antigos
+  const prim = itens[0];
+  const dados = {
+    cliente,
+    tipo_cliente: document.getElementById('m-tipo-cliente').value,
+    itens,
+    pecas,
+    projetoId: prim.tipo === 'projeto' ? prim.refId : null,
+    pacoteId: prim.tipo === 'pacote' ? prim.refId : null,
+    projetoNome: prim.tipo === 'projeto' ? prim.nome : '',
+    pacoteNome: prim.tipo === 'pacote' ? prim.nome : (itens.length > 1 ? 'Vários itens' : ''),
+    qtd: itens.reduce((s, i) => s + (i.qtd || 1), 0),
+    valor: valorTotal,
+    data: document.getElementById('m-data').value,
+    prazo: document.getElementById('m-prazo').value,
+    status: document.getElementById('m-status').value,
+    frete: Number(document.getElementById('m-frete').value) || 0,
+    pago: document.getElementById('m-pago').checked,
+    obs: document.getElementById('m-obs').value.trim(),
+    falhas: anterior ? (anterior.falhas || []) : []
+  };
+  let pedidoAnterior = null;
+  if (editId) {
+    const idx = state.pedidos.findIndex(x => x.id === editId);
+    pedidoAnterior = { ...state.pedidos[idx] };
+    state.pedidos[idx] = { ...state.pedidos[idx], ...dados };
+  } else {
+    state.pedidos.push({ id: uid(), ...dados });
   }
-  salvar(); fecharModal(); renderPedidos(); verificarNotificacoes();
+  const pedidoAtual = editId ? state.pedidos.find(x => x.id === editId) : state.pedidos[state.pedidos.length - 1];
+  const eraPago = pedidoAnterior ? pedidoAnterior.pago : false;
+  const descItens = itens.map(i => `${i.qtd}× ${i.nome}`).join(', ');
+  if (dados.pago && !eraPago && dados.valor > 0) {
+    state.transacoes.push({
+      id: uid(), tipo: 'entrada', valor: dados.valor, data: hoje(), categoria: 'Venda',
+      descricao: `Pedido - ${dados.cliente} (${descItens})`, pedidoId: pedidoAtual.id
+    });
+  }
+  if (!dados.pago && eraPago) {
+    const vinc = state.transacoes.filter(t => t.pedidoId === pedidoAtual.id);
+    if (vinc.length && confirm(`Você desmarcou "pago". Remover do caixa o lançamento de entrada deste pedido (${vinc.map(t => formatMoney(t.valor)).join(', ')})?\n\nOK = remover · Cancelar = manter no caixa`)) {
+      state.transacoes = state.transacoes.filter(t => t.pedidoId !== pedidoAtual.id);
+    }
+  }
+  salvar();
+  fecharModal();
+  renderPedidos();
+  verificarNotificacoes();
 }
 
 function togglePeca(pedidoId, i) {
-  const p = state.pedidos.find(x => x.id === pedidoId); if (!p || !p.pecas || !p.pecas[i]) return;
+  const p = state.pedidos.find(x => x.id === pedidoId);
+  if (!p || !p.pecas || !p.pecas[i]) return;
   p.pecas[i].feito = !p.pecas[i].feito;
   const feitas = p.pecas.filter(x => x.feito).length;
   if (feitas > 0 && p.status === 'pendente') p.status = 'producao';
-  salvar(); renderPedidos(); verificarAvisoPacote(p, feitas);
+  salvar();
+  renderPedidos();
+  verificarAvisoPacote(p, feitas);
 }
 function verificarAvisoPacote(p, feitas) {
+  if (!p.pecas || !p.pecas.length) return;
   if (feitas === p.pecas.length && ['pendente', 'producao'].includes(p.status)) {
     setTimeout(() => {
       if (confirm('Todas as peças estão prontas. Marcar o pedido como Concluído?')) {
         p.status = 'concluido';
-        salvar(); renderPedidos(); atualizarDashboard();
+        salvar();
+        renderPedidos();
+        atualizarDashboard();
       }
     }, 50);
   }
@@ -790,10 +1029,34 @@ function excluirFilamento(id){ if(!confirm('Excluir este filamento?')) return; s
 function renderRelatorio() {
   const el=document.getElementById('conteudo-relatorio');
   if(filtroRel==='projetos'){
-    const map={}; state.pedidos.forEach(p=>{ if(p.status==='cancelado') return; const key=p.pacoteId?('pac:'+p.pacoteId):(p.projetoId||'avulso'); const nome=p.pacoteId?('Pacote · '+(p.pacoteNome||'sem nome')):(p.projetoNome||(state.projetos.find(x=>x.id===p.projetoId)?.nome)||'Avulso'); if(!map[key]) map[key]={nome,qtd:0,receita:0,custo:0,lucro:0,pedidos:0}; const c=calcularCustoPedido(p); map[key].qtd+=(p.qtd||1); map[key].receita+=c.receita; map[key].custo+=c.custoTotal; map[key].lucro+=c.lucro; map[key].pedidos+=1; });
+    const map={};
+    state.pedidos.forEach(p=>{
+      if(p.status==='cancelado') return;
+      const its = itensDoPedido(p);
+      const c = calcularCustoPedido(p);
+      // Rateio simples do custo/lucro do pedido pelas linhas (proporcional ao valor da linha)
+      const somaVal = its.reduce((s,i)=>s+(Number(i.valor)||0),0) || 1;
+      its.forEach(it => {
+        const key = (it.tipo||'') + ':' + (it.refId||'avulso');
+        const nome = (it.tipo === 'pacote' ? 'Pacote · ' : '') + (it.nome || 'Avulso');
+        if(!map[key]) map[key]={nome,qtd:0,receita:0,custo:0,lucro:0,pedidos:0};
+        const share = (Number(it.valor)||0) / somaVal;
+        map[key].qtd += (it.qtd||1);
+        map[key].receita += (Number(it.valor)||0);
+        map[key].custo += c.custoTotal * share;
+        map[key].lucro += c.lucro * share;
+        map[key].pedidos += 1;
+      });
+      if (!its.length) {
+        const key = p.pacoteId ? ('pacote:'+p.pacoteId) : ('projeto:'+(p.projetoId||'avulso'));
+        const nome = p.pacoteId ? ('Pacote · '+(p.pacoteNome||'sem nome')) : (p.projetoNome||'Avulso');
+        if(!map[key]) map[key]={nome,qtd:0,receita:0,custo:0,lucro:0,pedidos:0};
+        map[key].qtd += (p.qtd||1); map[key].receita += c.receita; map[key].custo += c.custoTotal; map[key].lucro += c.lucro; map[key].pedidos += 1;
+      }
+    });
     const rows=Object.values(map).sort((a,b)=>b.lucro-a.lucro);
     if(!rows.length){ el.innerHTML='<div class="empty">Nenhum dado para relatório ainda.</div>'; return; }
-    el.innerHTML=`<div class="card"><table><thead><tr><th>Projeto</th><th class="num">Pedidos</th><th class="num">Receita</th><th class="num">Custo</th><th class="num">Lucro</th><th class="num">Margem</th></tr></thead><tbody>${rows.map(r=>{ const margem=r.receita>0?(r.lucro/r.receita*100):0; return `<tr><td>${esc(r.nome)}</td><td class="num">${r.pedidos}</td><td class="num">${formatMoney(r.receita)}</td><td class="num">${formatMoney(r.custo)}</td><td class="num ${r.lucro>=0?'profit-positive':'profit-negative'}">${formatMoney(r.lucro)}</td><td class="num">${margem.toFixed(0)}%</td></tr>`; }).join('')}</tbody></table></div><p class="text-sm text-muted mt-3">* Custo = filamento + energia + hora máquina + taxa de falha + frete + falhas.</p>`;
+    el.innerHTML=`<div class="card"><table><thead><tr><th>Projeto / Pacote</th><th class="num">Qtd</th><th class="num">Receita</th><th class="num">Custo</th><th class="num">Lucro</th><th class="num">Margem</th></tr></thead><tbody>${rows.map(r=>{ const margem=r.receita>0?(r.lucro/r.receita*100):0; return `<tr><td>${esc(r.nome)}</td><td class="num">${r.qtd}</td><td class="num">${formatMoney(r.receita)}</td><td class="num">${formatMoney(r.custo)}</td><td class="num ${r.lucro>=0?'profit-positive':'profit-negative'}">${formatMoney(r.lucro)}</td><td class="num">${margem.toFixed(0)}%</td></tr>`; }).join('')}</tbody></table></div><p class="text-sm text-muted mt-3">* Custo = filamento + energia + hora máquina + taxa de falha + frete + falhas. Em pedidos multi-item o custo é rateado pelo valor de cada linha.</p>`;
   } else {
     const map={}; state.pedidos.forEach(p=>{ if(p.status==='cancelado') return; const key=(p.cliente||'Sem nome').toLowerCase(); if(!map[key]) map[key]={nome:p.cliente||'Sem nome',tipo:p.tipo_cliente||'pf',qtd:0,receita:0,custo:0,lucro:0,pedidos:0}; const c=calcularCustoPedido(p); map[key].qtd+=(p.qtd||1); map[key].receita+=c.receita; map[key].custo+=c.custoTotal; map[key].lucro+=c.lucro; map[key].pedidos+=1; });
     const rows=Object.values(map).sort((a,b)=>b.lucro-a.lucro);
@@ -1027,8 +1290,8 @@ function avancarStatus(id) {
   const p = state.pedidos.find(x => x.id === id); if (!p) return;
   const prox = { pendente: 'producao', producao: 'concluido', concluido: 'entregue' }[p.status]; if (!prox) return;
   if (prox === 'concluido') {
-    if (p.pacoteId && p.pecas && p.pecas.some(x => !x.feito)) {
-      if (!confirm('Há peças do pacote ainda não marcadas como prontas. Concluir o pedido mesmo assim?')) return;
+    if (p.pecas && p.pecas.some(x => !x.feito)) {
+      if (!confirm('Há itens ainda não marcados como prontos. Concluir o pedido mesmo assim?')) return;
       p.pecas.forEach(x => { x.feito = true; });
     }
     p.status = 'concluido';
@@ -1036,7 +1299,7 @@ function avancarStatus(id) {
     p.status = 'entregue';
     if (!p.pago && (Number(p.valor) || 0) > 0 && confirm('Este pedido já foi pago? OK = registrar a entrada no caixa.')) {
       p.pago = true;
-      state.transacoes.push({ id: uid(), tipo: 'entrada', valor: Number(p.valor) || 0, data: hoje(), categoria: 'Venda', descricao: `Pedido - ${p.cliente} (${p.pacoteNome || p.projetoNome || 'avulso'})`, pedidoId: p.id });
+      state.transacoes.push({ id: uid(), tipo: 'entrada', valor: Number(p.valor) || 0, data: hoje(), categoria: 'Venda', descricao: `Pedido - ${p.cliente} (${nomeItensPedido(p)})`, pedidoId: p.id });
     }
   } else p.status = prox;
   salvar(); renderPedidos(); atualizarDashboard();
@@ -1049,6 +1312,7 @@ function duplicarPedido(id) {
   delete base.id; base.status = 'pendente'; base.pago = false; base.falhas = [];
   base.data = ''; base.prazo = ''; base.filamento_g = null; base.tempo_h = null;
   base.pecas = (base.pecas || []).map(x => ({ ...x, feito: false }));
+  if (base.itens) base.itens = base.itens.map(i => ({ ...i }));
   abrirModalPedido(null, base);
 }
 function duplicarProjeto(id) {
