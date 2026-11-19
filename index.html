@@ -403,6 +403,48 @@ function calcularCustoPedido(p) {
   return { grams, horas, custoTotal, receita, lucro: receita - custoTotal, margem: receita > 0 ? ((receita - custoTotal) / receita * 100) : 0 };
 }
 
+// ===== Rateio do pedido por item (custo real de cada item) =====
+function custoDiretoItem(it) {
+  const cfg = state.config; const q = Math.max(1, Number(it.qtd) || 1);
+  let custoFil = 0, horas = 0;
+  const add = (pr, qq) => {
+    if (!pr) return;
+    const g = (Number(pr.filamento_g) || 0) * qq, h = (Number(pr.tempo_h) || 0) * qq;
+    const f = state.filamentos.find(x => x.id === pr.filamentoId);
+    custoFil += (g / 1000) * (f ? (Number(f.custo_kg) || 0) : 0); horas += h;
+  };
+  if (it.tipo === 'pacote') {
+    const k = state.pacotes.find(x => x.id === it.refId);
+    (k && k.itens || []).forEach(pi => add(state.projetos.find(x => x.id === pi.projetoId), q * Math.max(1, Number(pi.qtd) || 1)));
+  } else add(state.projetos.find(x => x.id === it.refId), q);
+  const base = custoFil + horas * ((Number(cfg.custo_energia_hora) || 0) + (Number(cfg.custo_hora_maquina) || 0));
+  return base * (1 + (Number(cfg.taxa_falha) || 0) / 100);
+}
+// Divide receita e custo do pedido entre os itens, de modo que a soma sempre feche com o pedido:
+//  - custo de cada item = seu custo real (material + energia + máquina + taxa de falha)
+//  - frete, falhas e demais custos do pedido = repartidos pela receita de cada linha
+//  - receita de cada linha = ajustada ao total real do pedido (desconto repartido)
+function rateioPedido(p) {
+  const c = calcularCustoPedido(p); const its = itensDoPedido(p);
+  if (!its.length) return [];
+  const diretos = its.map(custoDiretoItem);
+  const somaDireto = diretos.reduce((a, b) => a + b, 0);
+  let pesos = its.map(i => Number(i.valor) || 0), somaPesos = pesos.reduce((a, b) => a + b, 0);
+  if (!(somaPesos > 0)) { pesos = diretos.slice(); somaPesos = somaDireto; }
+  if (!(somaPesos > 0)) { pesos = its.map(() => 1); somaPesos = its.length; }
+  const extras = c.custoTotal - somaDireto;
+  return its.map((it, i) => { const share = pesos[i] / somaPesos; return { it, receita: c.receita * share, custo: diretos[i] + extras * share }; });
+}
+function filamentosDoPedido(p) {
+  const ids = new Set();
+  const addP = pr => { if (pr && pr.filamentoId && state.filamentos.some(f => f.id === pr.filamentoId)) ids.add(pr.filamentoId); };
+  itensDoPedido(p).forEach(it => {
+    if (it.tipo === 'pacote') { const k = state.pacotes.find(x => x.id === it.refId); (k && k.itens || []).forEach(pi => addP(state.projetos.find(x => x.id === pi.projetoId))); }
+    else addP(state.projetos.find(x => x.id === it.refId));
+  });
+  return [...ids];
+}
+
 function navegar(page) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById('page-'+page).classList.add('active');
@@ -510,7 +552,7 @@ function renderProjetos() {
   const q = norm(busca.projetos);
   const lista = state.projetos.filter(p => !q || norm(p.nome + ' ' + (p.descricao || '')).includes(q));
   if (!lista.length) { el.innerHTML = '<div class="empty">Nenhum projeto encontrado.</div>'; return; }
-  el.innerHTML = lista.map(p => `<div class="list-item"><div class="top"><div><div class="title">${esc(p.nome)}</div><div class="meta">${p.filamento_g||0} g${nomeFilProj(p)} · ${p.tempo_h||0} h · ${formatMoney(p.preco)}${infoCustoProjeto(p)}</div></div></div>${avisoFilProj(p)}${p.descricao?`<div class="meta">${esc(p.descricao)}</div>`:''}<div class="actions"><button class="btn btn-ghost btn-sm" onclick="abrirModalProjeto('${p.id}')">Editar</button><button class="btn btn-ghost btn-sm" onclick="duplicarProjeto('${p.id}')">Duplicar</button><button class="btn btn-danger btn-sm" onclick="excluirProjeto('${p.id}')">Excluir</button></div></div>`).join('');
+  el.innerHTML = lista.map(p => `<div class="list-item"><div class="top"><div><div class="title">${esc(p.nome)}</div><div class="meta">${p.filamento_g||0} g${nomeFilProj(p)} · ${p.tempo_h||0} h · ${formatMoney(p.preco)}${infoCustoProjeto(p)}</div></div></div>${avisoFilProj(p)}${p.descricao?`<div class="meta">${esc(p.descricao)}</div>`:''}<div class="actions"><button class="btn btn-ghost btn-sm" onclick="abrirModalProjeto('${p.id}')">Editar</button><button class="btn btn-ghost btn-sm" onclick="duplicarProjeto('${p.id}')">Duplicar</button><button class="btn btn-danger btn-sm" onclick="excluirProjeto('${p.id}')">Excluir</button></div></div>`).join('') + notaTeorico();
 }
 
 function resumoFilamentoPacote(itens) {
@@ -555,7 +597,7 @@ function renderPacotes() {
     const itens = (k.itens || []).map(i => `${i.qtd||1}× ${esc(nomeProj(i.projetoId))}`).join(' · ');
     const total = (k.itens || []).reduce((s, i) => s + (Number(i.qtd) || 1), 0);
     return `<div class="list-item"><div class="top"><div><div class="title">${esc(k.nome)} <span class="tag-pk">PACOTE</span></div><div class="meta">${total} peça${total!==1?'s':''} · ${formatMoney(k.preco)}${infoCustoPacote(k)}</div></div></div><div class="meta">${itens}</div>${htmlResumoFilamento(k.itens)}${k.descricao?`<div class="meta">${esc(k.descricao)}</div>`:''}<div class="actions"><button class="btn btn-ghost btn-sm" onclick="abrirModalPacote('${k.id}')">Editar</button><button class="btn btn-ghost btn-sm" onclick="duplicarPacote('${k.id}')">Duplicar</button><button class="btn btn-danger btn-sm" onclick="excluirPacote('${k.id}')">Excluir</button></div></div>`;
-  }).join('');
+  }).join('') + notaTeorico();
 }
 
 function abrirModalPacote(id = null) {
@@ -1094,7 +1136,10 @@ function verificarAvisoPacote(p, feitas) {
 
 function abrirModalFalha(pedidoId) {
   const p=state.pedidos.find(x=>x.id===pedidoId); if(!p) return; editId=pedidoId;
-  const selFalha=p.pacoteId?`<div class="form-group"><label>Filamento da peça que falhou</label><select id="m-falha-fil"><option value="">— Selecione —</option>${state.filamentos.map(f=>`<option value="${f.id}">${esc(f.material)} ${esc(f.cor)}</option>`).join('')}</select></div>`:'';
+  const usados = filamentosDoPedido(p);
+  const optF = f => `<option value="${f.id}" ${usados.length===1&&usados[0]===f.id?'selected':''}>${esc(f.material)} ${esc(f.cor)}</option>`;
+  const doPed = state.filamentos.filter(f => usados.includes(f.id)), outros = state.filamentos.filter(f => !usados.includes(f.id));
+  const selFalha = `<div class="form-group"><label>Filamento da peça que falhou *</label><select id="m-falha-fil"><option value="">— Selecione —</option>${doPed.length?`<optgroup label="Usados neste pedido">${doPed.map(optF).join('')}</optgroup>`:''}${outros.length?`<optgroup label="${doPed.length?'Outros filamentos':'Filamentos cadastrados'}">${outros.map(optF).join('')}</optgroup>`:''}</select><div class="text-sm text-muted mt-2">Define o preço por kg usado no custo do material desperdiçado.</div></div>`;
   document.getElementById('modal-content').innerHTML=`<h2>Registrar Falha / Reimpressão</h2><p class="text-sm text-muted mb-3">Adiciona o custo da falha (material, energia e máquina) no lucro do pedido.</p>${selFalha}<div class="form-group"><label>Filamento desperdiçado (g) *</label><input id="m-falha-g" type="number" placeholder="Ex: 35"></div><div class="form-group"><label>Tempo perdido (h)</label><input id="m-falha-h" type="number" step="0.1" placeholder="Ex: 1.5"></div><div class="form-group"><label>Motivo / Observação</label><input id="m-falha-motivo" placeholder="Ex: Warping..."></div><div class="modal-actions"><button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button><button class="btn btn-warning" onclick="salvarFalha()">Registrar Falha</button></div>`;
   document.getElementById('modal').classList.add('open');
 }
@@ -1103,7 +1148,9 @@ function salvarFalha() {
   const g=Number(document.getElementById('m-falha-g').value); if(!g||g<=0) return alert('Informe os gramas desperdiçados');
   const h=Number(document.getElementById('m-falha-h').value)||0; const motivo=document.getElementById('m-falha-motivo').value.trim();
   const p=state.pedidos.find(x=>x.id===editId); if(!p) return;
-  if(!p.falhas) p.falhas=[]; const projF=state.projetos.find(x=>x.id===p.projetoId); const filId=(document.getElementById('m-falha-fil')||{}).value||p.filamentoId||(projF&&projF.filamentoId)||null;
+  const filId=(document.getElementById('m-falha-fil')||{}).value||null;
+  if(!filId && !confirm('Nenhum filamento foi escolhido para esta falha.\n\nSem ele, o custo do MATERIAL desperdiçado não entra no lucro do pedido (só energia e máquina). Registrar mesmo assim?')) return;
+  if(!p.falhas) p.falhas=[];
   p.falhas.push({id:uid(), data:hoje(), filamento_g:g, tempo_h:h, motivo, filamentoId:filId});
   salvar(); fecharModal(); renderPedidos(); alert('Falha registrada.');
 }
@@ -1192,17 +1239,15 @@ function renderRelatorio() {
       if(p.status==='cancelado') return;
       const its = itensDoPedido(p);
       const c = calcularCustoPedido(p);
-      // Rateio simples do custo/lucro do pedido pelas linhas (proporcional ao valor da linha)
-      const somaVal = its.reduce((s,i)=>s+(Number(i.valor)||0),0) || 1;
-      its.forEach(it => {
+      rateioPedido(p).forEach(r => {
+        const it = r.it;
         const key = (it.tipo||'') + ':' + (it.refId||'avulso');
         const nome = (it.tipo === 'pacote' ? 'Pacote · ' : '') + (it.nome || 'Avulso');
         if(!map[key]) map[key]={nome,qtd:0,receita:0,custo:0,lucro:0,pedidos:0};
-        const share = (Number(it.valor)||0) / somaVal;
         map[key].qtd += (it.qtd||1);
-        map[key].receita += (Number(it.valor)||0);
-        map[key].custo += c.custoTotal * share;
-        map[key].lucro += c.lucro * share;
+        map[key].receita += r.receita;
+        map[key].custo += r.custo;
+        map[key].lucro += r.receita - r.custo;
         map[key].pedidos += 1;
       });
       if (!its.length) {
@@ -1214,7 +1259,7 @@ function renderRelatorio() {
     });
     const rows=Object.values(map).sort((a,b)=>b.lucro-a.lucro);
     if(!rows.length){ el.innerHTML='<div class="empty">Nenhum dado para relatório ainda.</div>'; return; }
-    el.innerHTML=`<div class="card"><table><thead><tr><th>Projeto / Pacote</th><th class="num">Qtd</th><th class="num">Receita</th><th class="num">Custo</th><th class="num">Lucro</th><th class="num">Margem</th></tr></thead><tbody>${rows.map(r=>{ const margem=r.receita>0?(r.lucro/r.receita*100):0; return `<tr><td>${esc(r.nome)}</td><td class="num">${r.qtd}</td><td class="num">${formatMoney(r.receita)}</td><td class="num">${formatMoney(r.custo)}</td><td class="num ${r.lucro>=0?'profit-positive':'profit-negative'}">${formatMoney(r.lucro)}</td><td class="num">${margem.toFixed(0)}%</td></tr>`; }).join('')}</tbody></table></div><p class="text-sm text-muted mt-3">* Custo = filamento + energia + hora máquina + taxa de falha + frete + falhas. Em pedidos multi-item o custo é rateado pelo valor de cada linha.</p>`;
+    el.innerHTML=`<div class="card"><table><thead><tr><th>Projeto / Pacote</th><th class="num">Qtd</th><th class="num">Receita</th><th class="num">Custo</th><th class="num">Lucro</th><th class="num">Margem</th></tr></thead><tbody>${rows.map(r=>{ const margem=r.receita>0?(r.lucro/r.receita*100):0; return `<tr><td>${esc(r.nome)}</td><td class="num">${r.qtd}</td><td class="num">${formatMoney(r.receita)}</td><td class="num">${formatMoney(r.custo)}</td><td class="num ${r.lucro>=0?'profit-positive':'profit-negative'}">${formatMoney(r.lucro)}</td><td class="num">${margem.toFixed(0)}%</td></tr>`; }).join('')}</tbody></table></div><p class="text-sm text-muted mt-3">* Custo de cada item = seu custo real (filamento + energia + hora máquina + taxa de falha). Frete e falhas do pedido são repartidos pela receita de cada linha, e a receita das linhas é ajustada ao total real do pedido (descontos). A soma dos itens sempre fecha com o pedido.</p>`;
   } else {
     const map={}; state.pedidos.forEach(p=>{ if(p.status==='cancelado') return; const key=(p.cliente||'Sem nome').toLowerCase(); if(!map[key]) map[key]={nome:p.cliente||'Sem nome',tipo:p.tipo_cliente||'pf',qtd:0,receita:0,custo:0,lucro:0,pedidos:0}; const c=calcularCustoPedido(p); map[key].qtd+=(p.qtd||1); map[key].receita+=c.receita; map[key].custo+=c.custoTotal; map[key].lucro+=c.lucro; map[key].pedidos+=1; });
     const rows=Object.values(map).sort((a,b)=>b.lucro-a.lucro);
@@ -1365,6 +1410,9 @@ function margemDesejada() {
   const m = (raw === undefined || raw === null || raw === '') ? 50 : (Number(raw) || 0);
   return Math.min(Math.max(m, 0), 95);
 }
+function notaTeorico() {
+  return '<p class="text-sm text-muted mt-3">Lucro teórico = preço do catálogo − custo estimado (material + energia + máquina + taxa de falha), por unidade. Não inclui frete, falhas registradas nem descontos. O lucro real de cada pedido aparece na aba Pedidos.</p>';
+}
 function filDoProjeto(p) { return state.filamentos.find(f => f.id === p.filamentoId) || null; }
 function nomeFilProj(p) { const f = filDoProjeto(p); return f ? ` (${esc(f.material)} ${esc(f.cor)})` : ''; }
 function avisoFilProj(p) { return (Number(p.filamento_g) > 0 && !filDoProjeto(p)) ? '<div class="meta warning-text">⚠ Escolha o filamento para calcular o custo do material</div>' : ''; }
@@ -1380,7 +1428,7 @@ function infoCustoProjeto(p) {
   const g = Number(p.filamento_g) || 0, h = Number(p.tempo_h) || 0, preco = Number(p.preco) || 0;
   if ((!g && !h) || preco <= 0) return '';
   const { custo } = custoEstimadoProjeto(g, h, p.filamentoId);
-  return ` · custo ~${formatMoney(custo)} · margem ${((preco - custo) / preco * 100).toFixed(0)}%`;
+  return ` · custo ~${formatMoney(custo)} · lucro teórico ${formatMoney(preco - custo)}/un · margem ${((preco - custo) / preco * 100).toFixed(0)}%`;
 }
 function iniciarSugestao() {
   const box = document.getElementById('sugestao-preco');
@@ -1436,7 +1484,7 @@ function usarPrecoSugeridoPacote(v) { document.getElementById('m-pk-preco').valu
 function infoCustoPacote(k) {
   const r = calcPacote(k.itens); if (!r.linhas.length) return '';
   const preco = Number(k.preco) || 0;
-  return ` · sugerido ${formatMoney(r.sugerido)}` + (preco > 0 ? ` · margem ${((preco - r.custo) / preco * 100).toFixed(0)}%` : '');
+  return ` · sugerido ${formatMoney(r.sugerido)}` + (preco > 0 ? ` · custo ~${formatMoney(r.custo)} · lucro teórico ${formatMoney(preco - r.custo)}/un · margem ${((preco - r.custo) / preco * 100).toFixed(0)}%` : '');
 }
 
 // ===== Avançar status =====
